@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 247 247 251; --surface: 255 255 255; --muted: 241 241 246; --border: 228 228 236;
+  --fg: 17 17 28; --subtle: 107 109 128;
+  --primary: 109 93 252; --success: 16 185 129; --warning: 245 158 11; --danger: 239 68 68;
+  color-scheme: light;
+}
+.dark {
+  --bg: 11 11 18; --surface: 20 20 31; --muted: 30 30 44; --border: 42 42 60;
+  --fg: 236 236 245; --subtle: 150 152 175;
+  color-scheme: dark;
+}
+html, body { background: rgb(var(--bg)); color: rgb(var(--fg)); }
+body { font-feature-settings: "ss01"; -webkit-font-smoothing: antialiased; }
+* { scrollbar-width: thin; scrollbar-color: rgb(var(--border)) transparent; }
+
+@layer components {
+  .card { @apply bg-surface border border-border rounded-2xl shadow-card; }
+  .input { @apply w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15 placeholder:text-subtle/70 disabled:opacity-60; }
+  .label { @apply mb-1.5 block text-xs font-medium text-subtle; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition active:scale-[.98] disabled:pointer-events-none disabled:opacity-50 whitespace-nowrap; }
+  .btn-primary { @apply btn bg-primary text-white hover:brightness-110 shadow-sm shadow-primary/30; }
+  .btn-ghost { @apply btn hover:bg-muted text-fg; }
+  .btn-outline { @apply btn border border-border bg-surface hover:bg-muted; }
+  .btn-danger { @apply btn bg-danger text-white hover:brightness-110; }
+  .chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium; }
+  .skeleton { @apply relative overflow-hidden rounded-lg bg-muted before:absolute before:inset-0 before:-translate-x-full before:animate-[shimmer_1.4s_infinite] before:bg-gradient-to-r before:from-transparent before:via-white/40 dark:before:via-white/5 before:to-transparent; }
+  .prose-chat p { @apply my-2 leading-7; }
+  .prose-chat ul { @apply my-2 list-disc ps-5; }
+  .prose-chat ol { @apply my-2 list-decimal ps-5; }
+  .prose-chat h1, .prose-chat h2, .prose-chat h3 { @apply mt-3 mb-1 font-bold; }
+  .prose-chat table { @apply my-2 w-full text-sm; }
+  .prose-chat td, .prose-chat th { @apply border border-border px-2 py-1; }
+  .prose-chat code { @apply rounded bg-muted px-1; }
+}

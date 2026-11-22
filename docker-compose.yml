@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:16
+    environment: { POSTGRES_USER: studio, POSTGRES_PASSWORD: studio, POSTGRES_DB: social_studio }
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "studio"], interval: 5s, retries: 10 }
+  redis:
+    image: redis:7
+    volumes: [redisdata:/data]
+  app:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://studio:studio@postgres:5432/social_studio?schema=public
+      REDIS_URL: redis://redis:6379
+      STORAGE_LOCAL_DIR: /data/storage
+    volumes: [storage:/data/storage]
+    ports: ["3000:3000"]
+    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_started } }
+  worker:
+    build: .
+    env_file: .env
+    command: ["npx", "tsx", "worker/index.ts"]
+    environment:
+      DATABASE_URL: postgresql://studio:studio@postgres:5432/social_studio?schema=public
+      REDIS_URL: redis://redis:6379
+      STORAGE_LOCAL_DIR: /data/storage
+    volumes: [storage:/data/storage]
+    depends_on: [app]
+volumes: { pgdata: {}, redisdata: {}, storage: {} }
