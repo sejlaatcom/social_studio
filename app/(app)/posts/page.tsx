@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Send, Plus, Search, Copy, Trash2 } from "lucide-react";
 import { useApi, useDebounced } from "@/components/hooks";
 import { useT, useLocale } from "@/components/i18n";
@@ -11,9 +12,11 @@ import { AssetThumb } from "@/components/media";
 import { usePerms } from "@/components/shell";
 import { api } from "@/lib/client";
 
-export default function Posts() {
-  const t = useT(); const locale = useLocale(); const toast = useToast(); const can = usePerms();
-  const [status, setStatus] = useState(""); const [q, setQ] = useState(""); const [platform, setPlatform] = useState("");
+export default function Page() { return <Suspense><Posts /></Suspense>; }
+
+function Posts() {
+  const t = useT(); const locale = useLocale(); const toast = useToast(); const can = usePerms(); const sp = useSearchParams();
+  const [status, setStatus] = useState(sp.get("status") ?? ""); const [q, setQ] = useState(""); const [platform, setPlatform] = useState("");
   const dq = useDebounced(q);
   const { data, loading, error, reload } = useApi<any[]>(`/api/posts?status=${status}&q=${encodeURIComponent(dq)}&platform=${platform}`);
   const [del, setDel] = useState<string | null>(null);

@@ -73,6 +73,7 @@ export async function analyticsSummary(workspaceId: string, from: Date, to: Date
     totals: { posts: posts.length, views: sum("views"), impressions: sum("impressions"), reach: sum("reach"), likes: sum("likes"), comments: sum("comments"), shares: sum("shares"), saves: sum("saves"), engagement: totalEng, engagementRate: totalViews ? totalEng / totalViews : null },
     byPlatform, byType, daily: Object.values(daily).sort((a, b) => a.date.localeCompare(b.date)), growth, top,
     hasData: posts.length > 0 || followerSnaps.length > 0,
+    items: posts.map((s) => ({ platform: s.variant!.platform, publishedAt: s.variant!.publishedAt!, engagement: engagement(s), views: (s.views ?? 0) + (s.impressions ?? 0), reach: s.reach ?? 0 })),
   };
 }
 

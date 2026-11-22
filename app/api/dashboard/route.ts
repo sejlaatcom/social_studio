@@ -1,24 +1,22 @@
 import { route } from "@/lib/api";
 import { requireCtx } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { analyticsSummary } from "@/lib/analytics";
+import { dashboardData } from "@/lib/dashboard";
 import { parseRange } from "@/lib/range";
 
 export const GET = route(async (req) => {
   const c = await requireCtx(); const ws = c.workspaceId;
-  const { from, to } = parseRange(new URL(req.url).searchParams);
-  const [accounts, published, scheduled, inReview, drafts, campaigns, upcoming, failures, activity, summary, accountsList] = await Promise.all([
+  const { from, to, range } = parseRange(new URL(req.url).searchParams);
+  const [accounts, scheduled, inReview, drafts, campaigns, activeCampaigns, upcoming, activity, dash] = await Promise.all([
     db.socialAccount.count({ where: { workspaceId: ws, status: { not: "disconnected" } } }),
-    db.postVariant.count({ where: { post: { workspaceId: ws }, status: "published", publishedAt: { gte: from, lte: to } } }),
     db.post.count({ where: { workspaceId: ws, status: "scheduled" } }),
     db.post.count({ where: { workspaceId: ws, status: "in_review" } }),
     db.post.count({ where: { workspaceId: ws, status: { in: ["draft", "idea", "designing"] } } }),
     db.campaign.count({ where: { workspaceId: ws } }),
-    db.post.findMany({ where: { workspaceId: ws, status: "scheduled", scheduledAt: { gte: new Date() } }, orderBy: { scheduledAt: "asc" }, take: 6, include: { variants: { select: { platform: true } } } }),
-    db.postVariant.findMany({ where: { post: { workspaceId: ws }, status: "failed" }, orderBy: { updatedAt: "desc" }, take: 5, select: { id: true, platform: true, lastError: true, updatedAt: true, post: { select: { id: true, title: true } } } }),
-    db.auditLog.findMany({ where: { workspaceId: ws }, orderBy: { createdAt: "desc" }, take: 10, include: { user: { select: { name: true } } } }),
-    analyticsSummary(ws, from, to),
-    db.socialAccount.findMany({ where: { workspaceId: ws, status: { not: "disconnected" } }, select: { id: true, platform: true, displayName: true, status: true, followers: true } }),
+    db.campaign.count({ where: { workspaceId: ws, status: "active" } }),
+    db.post.findMany({ where: { workspaceId: ws, status: "scheduled", scheduledAt: { gte: new Date() } }, orderBy: { scheduledAt: "asc" }, take: 6, select: { id: true, title: true, scheduledAt: true, variants: { select: { platform: true } } } }),
+    db.auditLog.findMany({ where: { workspaceId: ws, NOT: { action: { in: ["auth.login", "auth.login_failed"] } } }, orderBy: { createdAt: "desc" }, take: 12, include: { user: { select: { name: true } } } }),
+    dashboardData(ws, from, to, { canApprove: c.can("content.approve"), userId: c.user.id }),
   ]);
-  return { counts: { accounts, published, scheduled, inReview, drafts, campaigns }, upcoming, failures, activity, summary, accounts: accountsList };
+  return { range: { from, to, key: range }, counts: { accounts, published: dash.kpis.published.value, scheduled, inReview, drafts, campaigns, activeCampaigns }, upcoming, activity, ...dash };
 });

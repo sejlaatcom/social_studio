@@ -1,5 +1,5 @@
 "use client";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useEffect, useState } from "react";
 
 // Categorical slots (validated reference palette), light/dark stepped.
@@ -16,6 +16,7 @@ export function useSeries() {
 const axis = { stroke: "rgb(var(--subtle))", fontSize: 11, tickLine: false, axisLine: false } as const;
 const tip = { contentStyle: { background: "rgb(var(--surface))", border: "1px solid rgb(var(--border))", borderRadius: 10, fontSize: 12, color: "rgb(var(--fg))" }, labelStyle: { color: "rgb(var(--subtle))" } };
 const fmt = (n: number) => Intl.NumberFormat("en", { notation: "compact" }).format(n);
+const fmtPrecise = (n: number) => Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 2 }).format(n);
 
 export function TrendChart({ data, x, y, label, height = 240 }: { data: Record<string, unknown>[]; x: string; y: string; label: string; height?: number }) {
   const c = useSeries()[0];
@@ -55,5 +56,26 @@ export function MultiLine({ data, x, series, height = 260 }: { data: Record<stri
       <Legend wrapperStyle={{ fontSize: 12 }} />
       {series.slice(0, 8).map((s, i) => <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={colors[i]} strokeWidth={2} dot={false} connectNulls activeDot={{ r: 5 }} />)}
     </LineChart>
+  </ResponsiveContainer>;
+}
+
+/** Current period vs previous period on one shared axis.
+ *  kind="bar": discrete per-bucket totals (bars) with the previous period as a dashed step line.
+ *  kind="area": cumulative levels (e.g. followers) as a continuous area. */
+export function CompareChart({ data, x, y, prevKey, label, prevLabel, fmtX, kind = "bar", height = 260 }: { data: Record<string, unknown>[]; x: string; y: string; prevKey?: string; label: string; prevLabel: string; fmtX: (v: string) => string; kind?: "bar" | "area"; height?: number }) {
+  const c = useSeries()[0];
+  const rtl = typeof document !== "undefined" && document.dir === "rtl";
+  return <ResponsiveContainer width="100%" height={height}>
+    <ComposedChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }} barCategoryGap="20%">
+      <defs><linearGradient id={`cg-${y}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={c} stopOpacity={0.22} /><stop offset="100%" stopColor={c} stopOpacity={0} /></linearGradient></defs>
+      <CartesianGrid vertical={false} stroke="rgb(var(--border))" strokeDasharray="3 3" />
+      <XAxis dataKey={x} {...axis} minTickGap={28} tickFormatter={fmtX} reversed={rtl} />
+      <YAxis {...axis} width={52} tickFormatter={kind === "area" ? fmtPrecise : fmt} orientation={rtl ? "right" : "left"} allowDecimals={false} domain={kind === "area" ? ["auto", "auto"] : [0, "auto"]} />
+      <Tooltip {...tip} labelFormatter={(v) => fmtX(String(v))} cursor={kind === "bar" ? { fill: "rgb(var(--muted))" } : { stroke: "rgb(var(--subtle))", strokeDasharray: "3 3" }} formatter={(v, n) => [v == null ? "—" : Number(v).toLocaleString(), n]} />
+      {prevKey && <Legend wrapperStyle={{ fontSize: 12 }} />}
+      {kind === "bar" ? <Bar dataKey={y} name={label} fill={c} radius={[4, 4, 0, 0]} maxBarSize={28} /> :
+        <Area type="monotone" dataKey={y} name={label} stroke={c} strokeWidth={2} fill={`url(#cg-${y})`} connectNulls activeDot={{ r: 5, strokeWidth: 2, stroke: "rgb(var(--surface))" }} />}
+      {prevKey && <Line type="stepAfter" dataKey={prevKey} name={prevLabel} stroke="rgb(var(--subtle))" strokeWidth={1.5} strokeDasharray="4 4" dot={false} activeDot={false} isAnimationActive={false} />}
+    </ComposedChart>
   </ResponsiveContainer>;
 }
