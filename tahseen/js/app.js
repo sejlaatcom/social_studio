@@ -96,14 +96,24 @@
   // ———— رفع التقرير ————
   function viewUpload(p) {
     const lp = state.lastParse;
-    const parsedInfo = lp ? `<div class="${lp.parsed.indicators.length ? 'ok' : 'note'}" style="margin-top:12px">
-        ${lp.parsed.indicators.length ? `✔ تمت قراءة <b>${esc(lp.name)}</b>: ${lp.numPages} صفحة، ${lp.parsed.indicators.length} مؤشرًا، ${lp.parsed.standards.length} معيارًا، ${lp.parsed.domains.length} مجالات${lp.parsed.overall != null ? `، الأداء العام ${pct(lp.parsed.overall)}` : ''}. راجع الجدول أدناه وصحّح ما يلزم.`
-        : `لم نتعرّف على مؤشرات في <b>${esc(lp.name)}</b>. قد يكون الملف ممسوحًا ضوئيًا (صورة) أو بتنسيق مختلف. استخدم الإدخال اليدوي أو الصق النص أدناه.`}
-        <details style="margin-top:8px"><summary class="small">عرض النص المستخرج (${lp.lines.length} سطر)</summary><pre class="raw">${esc(lp.lines.map((l) => l.text).join('\n'))}</pre></details></div>` : '';
+    let parsedInfo = '';
+    if (lp) {
+      const pr = lp.parsed;
+      const ok = pr.kind === 'plan' ? pr.actions.length : (pr.indicators.length || pr.domains.length);
+      const what = pr.kind === 'plan'
+        ? `تقرير «خطة تحسين» من منصة تميز: ${pr.actions.length} إجراءً — أُضيفت إجراءات كل مؤشر (وصف الاحتياج، إجراءات التحسين، آليات التنفيذ، المسؤول، مدة الإنجاز) إلى الخطة.`
+        : `${lp.numPages} صفحة${lp.ocr ? ' (ملف مصوّر — قُرئ بالتعرف الضوئي)' : ''}: ${pr.indicators.length} مؤشرًا، ${(pr.standardValues || pr.standards).length} معيارًا، ${pr.domains.length} مجالات${pr.overall != null ? `، الأداء العام ${pct(pr.overall)}` : ''}. راجع الجدول أدناه وصحّح ما يلزم.`;
+      parsedInfo = `<div class="${ok ? 'ok' : 'note'}" style="margin-top:12px">
+        ${ok ? `✔ تمت قراءة <b>${esc(lp.name)}</b> — ${what}` : `لم نتعرّف على بيانات في <b>${esc(lp.name)}</b>. استخدم الإدخال اليدوي أو الصق النص أدناه.`}
+        ${lp.lines && lp.lines.length ? `<details style="margin-top:8px"><summary class="small">عرض النص المستخرج (${lp.lines.length} سطر)</summary><pre class="raw">${esc(lp.lines.map((l) => l.text).join('\n'))}</pre></details>` : ''}</div>`;
+    }
     return `<div class="card"><h2>رفع تقرير الأداء المدرسي</h2>
-      <p class="muted">ارفع ملف PDF الصادر من منصة تميز (التقويم الذاتي — الدورة الأولى أو الثانية، أو التقويم الخارجي). تُقرأ النصوص داخل متصفحك ولا يُرفع الملف لأي خادم. يمكنك إعادة رفع التقرير على نفس الخطة في أي وقت دون فقدان تعديلاتك.</p>
+      <p class="muted">ارفع ملفات PDF الصادرة من منصة تميز، وتتعرّف الأداة على نوع كل ملف تلقائيًا. يُقرأ الملف داخل متصفحك ولا يُرفع لأي خادم، ويمكنك إعادة الرفع على نفس الخطة في أي وقت دون فقدان تعديلاتك.</p>
+      <div class="grid2 small" style="margin-bottom:12px">
+        <div class="kpi"><b style="font-size:15px">١. تقرير التقويم المدرسي</b>الذاتي (الدورة الأولى أو الثانية) أو الخارجي: يُستخرج منه الأداء العام والمجالات والمعايير ونسبة كل مؤشر ومقترح التحسين. التقارير المصوّرة تُقرأ بالتعرف الضوئي.</div>
+        <div class="kpi"><b style="font-size:15px">٢. تقرير «خطة تحسين» (اختياري)</b>تُستورد منه إجراءات كل مؤشر: وصف الاحتياج، إجراءات التحسين، آليات التنفيذ، المسؤول، ومدة الإنجاز.</div></div>
       <label class="drop" id="drop"><input type="file" accept="application/pdf,.pdf" data-act="pdf" hidden>
-        <b>${state.busy ? esc(state.busy) : 'اسحب ملف التقرير هنا أو اضغط للاختيار'}</b><span class="muted small">PDF فقط</span></label>
+        <b>${state.busy ? esc(state.busy) : 'اسحب ملف التقرير هنا أو اضغط للاختيار'}</b><span class="muted small">PDF — تقرير التقويم أو تقرير خطة التحسين</span></label>
       ${parsedInfo}
       <div class="grid4" style="margin-top:16px">
         ${field('نوع التقرير', `<select data-p="report.type">${Object.entries(M.REPORT_TYPES).map(([k, v]) => `<option value="${k}" ${p.report.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select>`)}
@@ -133,6 +143,7 @@
 
   function editorIndicators(p) {
     return `<div class="card"><div class="row"><h2 style="margin:0">المؤشرات (${p.indicators.length})</h2><span class="spacer"></span>
+      <button class="btn sm" data-act="loadFw" title="إضافة جميع مؤشرات الإطار الرسمي للمرحلة لإدخال نسبها يدويًا">＋ مؤشرات الإطار (${esc(M.stageOf(p) || 'المتوسطة')})</button>
       ${p.indicators.length ? '<button class="btn sm" data-act="swapCodes" title="إذا قُرئ الكود القديم مكان الجديد">تبديل الكود الجديد/القديم</button>' : ''}</div>
       <p class="small muted">أدخل النسب يدويًا إن لم يتوفر ملف PDF. «الاستبانة» اختيارية لحساب فجوة الإدراك. ألغِ «ضمن الخطة» لاستبعاد مؤشر من صفحات التحسين.</p>
       <div class="tw"><table class="t"><thead><tr><th>الرمز</th><th>الرمز السابق</th><th>نص المؤشر</th><th>النسبة</th><th>الاستبانة</th><th>المستوى</th><th>المستهدف</th><th>ضمن الخطة</th><th></th></tr></thead><tbody>
@@ -146,7 +157,7 @@
         <td style="text-align:center"><input type="checkbox" data-p="indicators.${k}.excluded" data-t="notbool" ${i.excluded ? '' : 'checked'} style="width:auto"></td>
         <td><button class="btn sm danger" data-act="delInd" data-k="${k}" title="حذف">✕</button></td></tr>`).join('')}
       </tbody></table></div>
-      <div class="row" style="margin-top:10px"><input class="code" id="newCode" placeholder="1.1.1"><input id="newText" placeholder="نص المؤشر" style="flex:1;min-width:200px"><input type="number" step="0.1" class="num" id="newScore" placeholder="%"><button class="btn primary sm" data-act="addInd">＋ إضافة مؤشر</button></div>
+      <div class="row" style="margin-top:10px"><input class="code" id="newCode" placeholder="1-1-1-1"><input id="newText" placeholder="نص المؤشر" style="flex:1;min-width:200px"><input type="number" step="0.1" class="num" id="newScore" placeholder="%"><button class="btn primary sm" data-act="addInd">＋ إضافة مؤشر</button></div>
       ${p.indicators.length ? `<div class="row" style="margin-top:16px"><span class="spacer"></span><button class="btn primary" data-act="tab" data-tab="dashboard">عرض لوحة النتائج ←</button></div>` : ''}</div>`;
   }
 
@@ -172,10 +183,14 @@
     const ov = M.overallOf(p);
     const dist = M.distribution(p);
     const total = dist.reduce((a, b) => a + b.count, 0) || 1;
-    return `<div class="card"><div class="row"><h2 style="margin:0">لوحة النتائج</h2><span class="spacer"></span><span class="muted small">${esc(M.REPORT_TYPES[p.report.type])}</span></div>
+    const d3 = p.domains.find((d) => d.code === '3');
+    const outLv = d3 && M.scoreOf(d3) != null ? M.levelOf(p, M.scoreOf(d3)) : null;
+    return `<div class="card"><div class="row"><h2 style="margin:0">لوحة النتائج</h2><span class="spacer"></span>
+      ${outLv || p.report.outcomesLevel ? `<span class="small">مستوى نواتج التعلم: ${outLv ? lvBadge(p, M.scoreOf(d3)) : `<b>${esc(p.report.outcomesLevel)}</b>`}</span>` : ''}
+      <span class="muted small">${esc(M.REPORT_TYPES[p.report.type])}</span></div>
       <div class="donut-wrap" style="margin-top:12px">${donut(p, ov)}
         <div style="flex:1;min-width:260px"><div class="kpis">${dist.map((l) => `<div class="kpi" style="border-inline-start:4px solid ${l.color}"><span>${l.name} <small>(من ${l.min}%)</small></span><b>${l.count}</b><small>${Math.round(l.count / total * 100)}% من المؤشرات</small></div>`).join('')}</div>
-        <h3>توزّع المؤشرات على المستويات</h3><div class="stack" role="img" aria-label="توزع المؤشرات">${dist.filter((l) => l.count).map((l) => `<div style="flex:${l.count};background:${l.color}" title="${l.name}: ${l.count}">${l.name} ${l.count}</div>`).join('')}</div></div></div></div>
+        <h3>توزّع المؤشرات على المستويات</h3><div class="stack" role="img" aria-label="توزع المؤشرات">${dist.filter((l) => l.count).map((l) => `<div style="flex:${l.count};background:${l.color}" title="${l.name}: ${l.count}">${l.count / total > 0.14 ? l.name + ' ' + l.count : l.count}</div>`).join('')}</div></div></div></div>
       <div class="grid2"><div class="card"><h2>أداء المجالات</h2>${bars(p, p.domains)}</div><div class="card"><h2>أداء المعايير</h2>${bars(p, p.standards)}</div></div>
       <div class="card"><h2>جميع المؤشرات</h2>${bars(p, p.indicators.map((i) => ({ code: i.code, name: i.text, score: i.score })))}</div>`;
   }
@@ -201,7 +216,8 @@
           ${a.surveyAvg == null ? '<p class="small">أدخل نتائج الاستبانات في جدول المؤشرات لإظهار الفجوة.</p>' : `<p class="small">متوسط الاستبانات <b>${pct(a.surveyAvg)}</b> · النتيجة الفعلية <b>${pct(a.actualAvg)}</b></p>
           ${a.gaps.length ? `<ol>${a.gaps.map((g) => li(g.ind, `<span class="small ${g.gap > 0 ? 'down' : 'up'}">(استبانة ${pct(g.ind.survey)}، فجوة ${g.gap > 0 ? '+' : ''}${g.gap})</span>`)).join('')}</ol>` : '<p class="small">لا توجد فجوات تتجاوز 10 نقاط.</p>'}`}</div>
       </div>
-      <div class="card" style="margin-top:18px"><h2>أولويات التحسين حسب المعايير</h2>${bars(p, a.standardsRanked)}</div>`;
+      <div class="card" style="margin-top:18px"><h2>أولويات التحسين حسب المعايير</h2>${bars(p, a.standardsRanked)}</div>
+      ${p.recommendations && p.recommendations.length ? `<div class="card"><h2>توصيات ومقترحات التحسين (من خطة منصة تميز)</h2><div class="grid2">${p.recommendations.map((r) => `<div><h3>${esc((p.domains.find((d) => d.code === r.domain) || {}).name || 'المجال ' + r.domain)}</h3><ul>${r.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')}</div></div>` : ''}`;
   }
 
   // ———— خطة التحسين ————
@@ -212,8 +228,9 @@
     const idx = (i) => p.indicators.indexOf(i);
     return `<div class="card"><div class="row"><h2 style="margin:0">خطة التحسين</h2><span class="spacer"></span>
         <button class="btn primary" data-act="exportPdf">⬇ تصدير PDF</button><button class="btn" data-act="exportDocx">⬇ تصدير Word</button><button class="btn" data-act="previewPdf">معاينة</button></div>
-      <p class="small muted">تضم الخطة ${st.total} صفحة: الغلاف، بطاقة المدرسة، قرار تشكيل الفريق، لوحة النتائج، القراءة التحليلية${p.previous ? '، المقارنة' : ''}، فهرس لكل مجال، صفحة لكل مؤشر (${list.length})، جدول الاستدامة، وصفحة المتابعة والاعتماد. عند تصدير PDF اختر «حفظ بتنسيق PDF» من نافذة الطباعة.</p>
-      <div class="row"><label class="row small" style="font-weight:700"><input type="checkbox" data-p="settings.includeAdvanced" data-t="bool" data-r ${p.settings.includeAdvanced !== false ? 'checked' : ''} style="width:auto"> تضمين مؤشرات مستوى «تقدّم» في صفحات التحسين</label>
+      <p class="small muted">${p.report.planSource ? `✔ مستوردة من: <b>${esc(p.report.planSource)}</b>. ` : 'لاستيراد إجراءات المنصة ارفع تقرير «خطة تحسين» من تبويب رفع التقرير. '}تضم الخطة ${st.total} صفحة: الغلاف، بطاقة المدرسة، قرار تشكيل الفريق، لوحة النتائج، القراءة التحليلية${p.previous ? '، المقارنة' : ''}، فهرس لكل مجال، صفحة لكل مؤشر (${list.length})، جدول الاستدامة، وصفحة المتابعة والاعتماد. عند تصدير PDF اختر «حفظ بتنسيق PDF» من نافذة الطباعة.</p>
+      <div class="row"><div style="display:flex;flex-direction:column;gap:4px"><label class="row small" style="font-weight:700"><input type="checkbox" data-p="settings.includeAdvanced" data-t="bool" data-r ${p.settings.includeAdvanced !== false ? 'checked' : ''} style="width:auto"> تضمين مؤشرات مستوى «التقدم»</label>
+        <label class="row small" style="font-weight:700"><input type="checkbox" data-p="settings.includeExcellence" data-t="bool" data-r ${p.settings.includeExcellence ? 'checked' : ''} style="width:auto"> تضمين مؤشرات مستوى «التميز» (استدامة — كما في خطة المنصة)</label></div>
         <span class="spacer"></span>${field('بداية التنفيذ', inp('period.start', p.period.start, { ph: '1447-03-01' }))}${field('نهاية التنفيذ', inp('period.end', p.period.end, { ph: '1447-11-30' }))}
         <button class="btn sm" data-act="applyPeriod" title="تطبيق التواريخ على كل البرامج">تطبيق على البرامج</button></div></div>
       ${list.length ? list.map((i) => indicatorEditor(p, i, idx(i), st)).join('') : '<div class="card empty">جميع المؤشرات في مستوى التميز — راجع جدول الاستدامة في الملف المصدّر.</div>'}`;
@@ -230,12 +247,16 @@
           ${field('المستهدف %', inp(`indicators.${k}.target`, i.target, { type: 'number', t: 'num', step: '0.1', r: 1 }))}
           <label class="f">الفجوة<b style="font-size:20px;color:var(--ink)">${gap}</b></label>
           <label class="f">&nbsp;<button class="btn sm" data-act="regen" data-k="${k}">↻ اقتراح برامج جديدة</button></label></div>
+        ${i.plan.source === 'platform' ? '<div class="ok small" style="margin-top:10px">✔ الإجراءات مستوردة من تقرير «خطة تحسين» في منصة تميز.</div>' : i.plan.source === 'bank' ? '<div class="note small" style="margin-top:10px">إجراءات مقترحة من بنك الإجراءات المعتمد على صيغة منصة تميز — عدّلها بما يناسب مدرستك.</div>' : ''}
+        <div class="grid2" style="margin-top:12px">${field('وصف الاحتياج', inp(`${base}.need`, i.plan.need, { area: 1, rows: 3 }))}
+          ${field('مقترح التحسين الوارد في تقرير التقويم', inp(`${base}.suggestion`, i.plan.suggestion, { area: 1, rows: 3 }))}</div>
         <div style="margin-top:12px">${field('المبادرة', inp(`${base}.initiative`, i.plan.initiative))}</div>
-        <h3>البرامج وأساليب التنفيذ</h3>
+        <h3>البرامج وإجراءات التحسين</h3>
         <div class="tw"><table class="t"><thead><tr><th>البرنامج</th><th>أسلوب التنفيذ</th><th>المسؤول</th><th>من</th><th>إلى</th><th></th></tr></thead><tbody>
         ${i.plan.programs.map((g, n) => `<tr><td style="min-width:220px">${inp(`${base}.programs.${n}.name`, g.name)}</td><td>${inp(`${base}.programs.${n}.method`, g.method)}</td><td>${inp(`${base}.programs.${n}.owner`, g.owner)}</td>
           <td>${inp(`${base}.programs.${n}.start`, g.start, { ph: '1447-03-01' })}</td><td>${inp(`${base}.programs.${n}.end`, g.end)}</td><td><button class="btn sm danger" data-act="delProg" data-k="${k}" data-n="${n}">✕</button></td></tr>`).join('')}
         </tbody></table></div><button class="btn sm" data-act="addProg" data-k="${k}" style="margin-top:8px">＋ برنامج</button>
+        <div style="margin-top:12px">${field('أساليب وآليات التنفيذ (بند في كل سطر)', inp(`${base}.mechanisms`, (i.plan.mechanisms || []).join('\n'), { area: 1, t: 'lines', rows: 3 }))}</div>
         <div class="grid2" style="margin-top:12px">${field('الأدلة والشواهد (دليل في كل سطر)', inp(`${base}.evidence`, i.plan.evidence.join('\n'), { area: 1, t: 'lines', rows: 4 }))}
           <div>${field('مؤشر القياس', inp(`${base}.measure`, i.plan.measure))}<div style="height:10px"></div>${field('الفريق المكلف', inp(`${base}.team`, i.plan.team))}</div></div>
         <div style="margin-top:12px">${field('إجراءات الاستدامة', inp(`${base}.sustain`, i.plan.sustain))}</div>
@@ -301,7 +322,8 @@
         ${f('region', 'إدارة التعليم (المنطقة/المحافظة)')}${f('office', 'مكتب التعليم')}${field('المرحلة', `<select data-p="school.stage">${['', 'رياض الأطفال', 'الابتدائية', 'المتوسطة', 'الثانوية', 'مجمع'].map((v) => `<option ${p.school.stage === v ? 'selected' : ''}>${v}</option>`).join('')}</select>`)}
         ${field('النوع', `<select data-p="school.gender">${['بنين', 'بنات'].map((v) => `<option ${p.school.gender === v ? 'selected' : ''}>${v}</option>`).join('')}</select>`)}
         ${f('students', 'عدد الطلاب', { type: 'number' })}${f('teachers', 'عدد المعلمين', { type: 'number' })}${f('classes', 'عدد الفصول', { type: 'number' })}
-        ${f('principal', 'قائد المدرسة')}${f('deputy', 'الوكيل')}${f('supervisor', 'المشرف التربوي')}${f('phone', 'الهاتف')}${f('email', 'البريد الإلكتروني')}${f('address', 'العنوان')}</div>
+        ${f('principal', 'قائد المدرسة')}${f('deputy', 'الوكيل')}${f('supervisor', 'المشرف التربوي')}${f('phone', 'الهاتف')}${f('email', 'البريد الإلكتروني')}${f('address', 'العنوان')}
+        ${f('shift', 'الفترة الدراسية')}${f('authority', 'نوع السلطة')}${f('participation', 'نوع المشاركة')}${f('ref', 'مرجع خطة منصة تميز')}</div>
       <div class="row" style="margin-top:14px"><b class="small">شعار يظهر في رأس الصفحات (اختياري):</b>${p.school.logo ? `<img class="logo-prev" src="${p.school.logo}" alt="الشعار">` : ''}
         <label class="btn sm">اختيار صورة<input type="file" accept="image/png,image/jpeg" data-act="logo" hidden></label>${p.school.logo ? '<button class="btn sm danger" data-act="logoClear">إزالة</button>' : ''}</div></div>
     <div class="card"><h2>قرار تشكيل فريق التقويم الذاتي</h2>
@@ -327,11 +349,20 @@
   }
 
   // ———— قراءة ملفات PDF ————
+  const setBusy = (msg) => { state.busy = msg; const d = document.querySelector('#drop b'); if (d) d.textContent = msg; const c = document.getElementById('busyMsg'); if (c) c.textContent = msg; };
+
+  // قراءة أي تقرير: نصّي، أو مصوّر (بالتعرف الضوئي)، أو تقرير «خطة تحسين» من المنصة
   async function readPdf(file) {
     state.busy = 'جارٍ قراءة الملف…'; render();
     try {
-      const ex = await P.extractPdf(file, (n, t) => { state.busy = `جارٍ قراءة الصفحة ${n} من ${t}…`; const d = document.querySelector('#drop b'); if (d) d.textContent = state.busy; });
-      const parsed = P.parseLines(ex.lines);
+      const ex = await P.extractPdf(file, (n, t) => setBusy(`جارٍ قراءة الصفحة ${n} من ${t}…`));
+      let parsed;
+      if (ex.textChars < 40 * ex.numPages) {
+        if (!window.TahseenOCR) throw new Error('الملف مصوّر ولا يحتوي نصًا، ومحرك التعرف الضوئي غير متاح');
+        setBusy('الملف مصوّر — جارٍ التعرف الضوئي داخل متصفحك (قد يستغرق دقيقة)…');
+        parsed = await window.TahseenOCR.readImageReport(ex.pdf, setBusy);
+        parsed.kind = 'self';
+      } else parsed = P.parseLines(ex.lines);
       return { ex, parsed };
     } finally { state.busy = ''; }
   }
@@ -340,15 +371,18 @@
     const p = plan();
     try {
       const { ex, parsed } = await readPdf(file);
-      state.lastParse = { name: file.name, numPages: ex.numPages, lines: ex.lines, parsed };
-      if (parsed.indicators.length || parsed.domains.length) {
+      state.lastParse = { name: file.name, numPages: ex.numPages, lines: ex.lines, parsed, ocr: !!parsed.ocr };
+      if (parsed.kind === 'plan') {
+        if (!parsed.actions.length) toast('لم يُتعرف على إجراءات في تقرير الخطة');
+        else { const r = M.applyParsed(p, parsed, file.name); save(true); toast(`تم استيراد خطة المنصة: ${r.matched} إجراء${r.added ? `، وأُضيف ${r.added} مؤشرًا` : ''}`, 4000); }
+      } else if (parsed.indicators.length || parsed.domains.length) {
         M.applyParsed(p, parsed, file.name);
         save(true);
-        toast(`تمت قراءة ${parsed.indicators.length} مؤشرًا`);
+        toast(`تمت قراءة ${parsed.indicators.length} مؤشرًا${parsed.ocr ? ' بالتعرف الضوئي' : ''}`);
       } else toast('لم يُتعرف على مؤشرات — راجع النص المستخرج');
     } catch (e) {
       console.error(e);
-      toast('تعذرت قراءة الملف: ' + (e.message || e));
+      toast('تعذرت قراءة الملف: ' + (e.message || e), 5000);
     }
     render();
   }
@@ -464,15 +498,16 @@
       }
       case 'addInd': {
         const code = document.getElementById('newCode').value.trim().replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
-        if (!/^\d+\.\d+\.\d+$/.test(code)) { toast('أدخل رمز المؤشر بالصيغة 1.2.3'); return; }
-        if (p.indicators.some((i) => i.code === code)) { toast('الرمز موجود مسبقًا'); return; }
+        if (!/^\d+([.\-]\d+){2,3}$/.test(code)) { toast('أدخل رمز المؤشر بالصيغة 1-2-1-3'); return; }
+        if (p.indicators.some((i) => i.code === P.normCode(code))) { toast('الرمز موجود مسبقًا'); return; }
         M.addIndicator(p, code, document.getElementById('newText').value.trim(), document.getElementById('newScore').value);
-        const sc = code.split('.').slice(0, 2).join('.');
+        const sc = P.standardOf(code);
         if (!p.standards.some((s) => s.code === sc)) { p.standards.push({ code: sc, name: 'معيار ' + sc, score: null }); p.standards.sort(P.cmpCode); }
         save(); break;
       }
       case 'delInd': if (confirm('حذف المؤشر؟')) { p.indicators.splice(k, 1); M.recompute(p); save(); } break;
       case 'pickVal': e.preventDefault(); p.indicators[k].score = Number(el.dataset.v); p.indicators[k].target = null; M.ensureIndicator(p, p.indicators[k]); M.recompute(p); save(); break;
+      case 'loadFw': { const n = M.loadFramework(p); save(); toast(n ? `أُضيف ${n} مؤشرًا من الإطار — أدخل نسبها` : 'جميع مؤشرات الإطار موجودة'); break; }
       case 'swapCodes': p.indicators.forEach((i) => { if (i.oldCode) { const t = i.code; i.code = i.oldCode; i.oldCode = t; } }); p.indicators.sort(P.cmpCode); M.recompute(p); save(); toast('تم التبديل'); break;
       case 'addRow': { const arr = p[el.dataset.kind]; arr.push({ code: '', name: '', score: null }); save(); break; }
       case 'delRow': p[el.dataset.kind].splice(k, 1); M.recompute(p); save(); break;
@@ -496,15 +531,15 @@
         save(); break;
       }
       case 'prevClear': p.previous = null; save(); break;
-      case 'exportPdf': X.printHtml(X.buildPlanHtml(p)); toast('اختر «حفظ بتنسيق PDF» من نافذة الطباعة', 4000); return;
-      case 'previewPdf': if (!X.previewHtml(X.buildPlanHtml(p))) toast('اسمح بالنوافذ المنبثقة للمعاينة'); return;
+      case 'exportPdf': { toast('جارٍ تجهيز الخطة…'); const split = await X.measureSplits(p); X.printHtml(X.buildPlanHtml(p, { split })); toast('اختر «حفظ بتنسيق PDF» من نافذة الطباعة', 4000); return; }
+      case 'previewPdf': { const w = window.open('', '_blank'); if (!w) { toast('اسمح بالنوافذ المنبثقة للمعاينة'); return; } w.document.write('<p dir="rtl" style="font-family:sans-serif">جارٍ تجهيز المعاينة…</p>'); const split = await X.measureSplits(p); w.document.open(); w.document.write(X.buildPlanHtml(p, { split })); w.document.close(); return; }
       case 'supPdf': X.printHtml(X.buildSupervisoryHtml(p)); toast('اختر «حفظ بتنسيق PDF» والاتجاه أفقي', 4000); return;
       case 'supPreview': if (!X.previewHtml(X.buildSupervisoryHtml(p))) toast('اسمح بالنوافذ المنبثقة للمعاينة'); return;
       case 'exportDocx':
       case 'supDocx': {
         el.disabled = true;
         try {
-          const blob = act === 'exportDocx' ? await W.exportPlan(p) : await W.exportSupervisory(p);
+          const blob = act === 'exportDocx' ? await W.exportPlan(p, { split: await X.measureSplits(p) }) : await W.exportSupervisory(p);
           const name = (p.school.name || 'خطة') .replace(/[\\/:*?"<>|]/g, '');
           W.download(blob, act === 'exportDocx' ? `خطة التحسين - ${name}.docx` : `النموذج الإشرافي - ${name}.docx`);
           toast('تم إنشاء ملف Word');

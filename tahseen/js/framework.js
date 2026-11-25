@@ -4,10 +4,10 @@
 
   // مستويات الأداء الأربعة (قابلة للتعديل من الإعدادات)
   const LEVELS = [
-    { key: 'excellence', name: 'تميّز', min: 90, color: '#0f7b5f', soft: '#d9f2ea' },
-    { key: 'advanced', name: 'تقدّم', min: 75, color: '#2f6fb3', soft: '#dde9f7' },
-    { key: 'launch', name: 'انطلاق', min: 50, color: '#c98a12', soft: '#fbefd6' },
-    { key: 'prep', name: 'تهيئة', min: 0, color: '#c0392b', soft: '#f8dedb' },
+    { key: 'excellence', name: 'التميز', min: 90, color: '#0f7b5f', soft: '#d9f2ea' },
+    { key: 'advanced', name: 'التقدم', min: 75, color: '#2f6fb3', soft: '#dde9f7' },
+    { key: 'launch', name: 'الانطلاق', min: 50, color: '#c98a12', soft: '#fbefd6' },
+    { key: 'prep', name: 'التهيئة', min: 0, color: '#c0392b', soft: '#f8dedb' },
   ];
 
   function levelOf(score, levels) {
@@ -28,25 +28,40 @@
     return Math.min(100, Math.max(95, Math.round(score + 2)));
   }
 
-  // الهيكل الافتراضي (يُستبدل تلقائيًا بأسماء المجالات والمعايير الواردة في التقرير)
+  // الهيكل الرسمي (الإصدار الثالث): 4 مجالات و11 معيارًا
   const DEFAULT_DOMAINS = [
     { code: '1', name: 'الإدارة المدرسية' },
-    { code: '2', name: 'التعليم والتعلّم' },
-    { code: '3', name: 'نواتج التعلّم' },
+    { code: '2', name: 'التعليم والتعلم' },
+    { code: '3', name: 'نواتج التعلم' },
     { code: '4', name: 'البيئة المدرسية' },
   ];
   const DEFAULT_STANDARDS = [
-    { code: '1.1', name: 'القيادة المدرسية' },
-    { code: '1.2', name: 'التخطيط والتحسين المستمر' },
-    { code: '1.3', name: 'الشراكة مع الأسرة والمجتمع' },
-    { code: '2.1', name: 'التخطيط للتعليم والتعلّم' },
-    { code: '2.2', name: 'الممارسات التدريسية' },
-    { code: '2.3', name: 'التقويم' },
-    { code: '3.1', name: 'التحصيل الدراسي' },
-    { code: '3.2', name: 'التطور الشخصي والصحي والاجتماعي' },
-    { code: '4.1', name: 'المبنى المدرسي والأمن والسلامة' },
-    { code: '4.2', name: 'المناخ المدرسي والأنشطة' },
+    { code: '1-1', name: 'التخطيط' },
+    { code: '1-2', name: 'قيادة العملية التعليمية' },
+    { code: '1-3', name: 'المجتمع المدرسي' },
+    { code: '1-4', name: 'التطوير المؤسسي' },
+    { code: '1-5', name: 'حقوق المتعلم وحمايته' },
+    { code: '2-1', name: 'بناء خبرات التعلم' },
+    { code: '2-2', name: 'تقويم التعلم' },
+    { code: '3-1', name: 'التحصيل التعليمي' },
+    { code: '3-2', name: 'التطور الشخصي والصحي والاجتماعي' },
+    { code: '4-1', name: 'المبنى المدرسي' },
+    { code: '4-2', name: 'الأمن والسلامة' },
   ];
+  const STAGES = { 'الابتدائية': 'middle', 'المتوسطة': 'middle', 'الثانوية': 'secondary' };
+
+  // مؤشرات الإطار حسب المرحلة (المرحلة الابتدائية تُبنى مؤقتًا على مؤشرات المتوسطة لنواتج التعلم)
+  function indicatorsFor(stage) {
+    const C = global.TahseenCatalog;
+    if (!C) return [];
+    const key = STAGES[stage] || 'middle';
+    return C.common.concat(C.outcomes[key] || []).map((x) => ({ ...x }))
+      .sort((a, b) => global.TahseenParser.cmpCode(a, b));
+  }
+  function catalogText(code, stage) {
+    const it = indicatorsFor(stage).find((x) => x.code === code);
+    return it ? it.text : '';
+  }
 
   // مكتبة البرامج — تُطابق بالكلمات المفتاحية في نص المؤشر، ثم بالمجال كاحتياط
   const LIBRARY = [
@@ -212,6 +227,15 @@
     '1': 1, '2': 4, '3': 6, '4': 9,
   };
 
+  function bankFor(text) {
+    const C = global.TahseenCatalog;
+    if (!C || !text) return null;
+    if (C.bank[text]) return C.bank[text];
+    let best = null, bs = 0;
+    for (const k in C.bank) { const sc = global.TahseenParser.similarity(k, text); if (sc > bs) { bs = sc; best = k; } }
+    return bs >= 0.55 ? C.bank[best] : null;
+  }
+
   function suggestFor(indicator) {
     const text = (indicator.text || '') + ' ' + (indicator.standardName || '');
     let best = null, bestScore = 0;
@@ -221,13 +245,21 @@
       if (s > bestScore) { bestScore = s; best = item; }
     }
     if (!best) {
-      const d = String(indicator.code || '').split('.')[0];
+      const d = global.TahseenParser.domainOf(indicator.code);
       best = LIBRARY[DOMAIN_FALLBACK[d] != null ? DOMAIN_FALLBACK[d] : 0];
     }
-    return JSON.parse(JSON.stringify(best));
+    const out = JSON.parse(JSON.stringify(best));
+    const bank = bankFor(indicator.text);
+    if (bank) {
+      out.need = bank.need;
+      if (bank.procedures && bank.procedures.length) out.programs = bank.procedures.slice();
+      out.mechanisms = (bank.mechanisms || []).slice();
+      out.fromBank = true;
+    }
+    return out;
   }
 
   global.TahseenFramework = {
-    LEVELS, levelOf, defaultTarget, DEFAULT_DOMAINS, DEFAULT_STANDARDS, LIBRARY, suggestFor,
+    LEVELS, levelOf, defaultTarget, DEFAULT_DOMAINS, DEFAULT_STANDARDS, STAGES, LIBRARY, suggestFor, bankFor, indicatorsFor, catalogText,
   };
 })(window);

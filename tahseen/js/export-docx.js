@@ -5,6 +5,7 @@
   const X = global.TahseenPdf;
 
   const GREEN = '0F6B5C', SOFT = 'E3F0EC', FONT = 'Arial';
+  const CONTENT_W = 11906 - 1600, LAND_W = 16838 - 1200;
 
   function D() { if (!global.docx) throw new Error('مكتبة Word غير محمّلة'); return global.docx; }
   const pct = (v) => (v == null || v === '' || isNaN(v) ? '—' : `${M.round1(Number(v))}%`);
@@ -32,7 +33,7 @@
     o = o || {};
     const paras = (Array.isArray(content) ? content : String(content == null ? '' : content).split('\n')).map((c) => (c instanceof d.Paragraph ? c : P(c, { size: o.size || 19, bold: o.bold, align: o.align || d.AlignmentType.CENTER, after: 0, color: o.color })));
     return new d.TableCell({ children: paras, shading: o.fill ? { type: d.ShadingType.CLEAR, fill: o.fill, color: 'auto' } : undefined,
-      width: o.width ? { size: o.width, type: d.WidthType.PERCENTAGE } : undefined, verticalAlign: d.VerticalAlign.CENTER,
+      width: o.width ? { size: Math.round((o.width / 100) * (o.total || CONTENT_W)), type: d.WidthType.DXA } : undefined, verticalAlign: d.VerticalAlign.CENTER,
       margins: { top: 50, bottom: 50, left: 80, right: 80 } });
   }
   function table(headers, rows, opts) {
@@ -41,8 +42,14 @@
     const size = opts.size || 18;
     const border = { style: d.BorderStyle.SINGLE, size: 4, color: 'B9CFC9' };
     const tr = [];
-    if (headers) tr.push(new d.TableRow({ tableHeader: true, children: headers.map((t, k) => cell(t, { bold: true, fill: SOFT, size, width: opts.widths && opts.widths[k] })) }));
-    for (const r of rows) tr.push(new d.TableRow({ cantSplit: true, children: r.map((t, k) => cell(t, { size, align: opts.textCols && opts.textCols.includes(k) ? d.AlignmentType.RIGHT : d.AlignmentType.CENTER, width: opts.widths && opts.widths[k] })) }));
+    if (headers) tr.push(new d.TableRow({ tableHeader: true, children: headers.map((t, k) => cell(t, { bold: true, fill: SOFT, size, width: opts.widths && opts.widths[k], total: opts.total })) }));
+    for (const r of rows) tr.push(new d.TableRow({ cantSplit: true, children: r.map((t, k) => cell(t, { size, align: opts.textCols && opts.textCols.includes(k) ? d.AlignmentType.RIGHT : d.AlignmentType.CENTER, width: opts.widths && opts.widths[k], total: opts.total })) }));
+    if (opts.widths) {
+      const total = opts.total || CONTENT_W;
+      const cols = opts.widths.map((w) => Math.round((w / 100) * total));
+      return new d.Table({ rows: tr, width: { size: total, type: d.WidthType.DXA }, columnWidths: cols, layout: d.TableLayoutType.FIXED, visuallyRightToLeft: true,
+        borders: { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border } });
+    }
     return new d.Table({ rows: tr, width: { size: 100, type: d.WidthType.PERCENTAGE }, visuallyRightToLeft: true,
       borders: { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border } });
   }
@@ -60,7 +67,7 @@
     const d = D();
     const s = plan.school;
     const right = [P('المملكة العربية السعودية', { bold: true, size: 18, color: GREEN, after: 0 }), P('وزارة التعليم', { bold: true, size: 18, color: GREEN, after: 0 }),
-      P(s.region ? 'الإدارة العامة للتعليم ' + s.region : 'إدارة التعليم', { bold: true, size: 18, color: GREEN, after: 0 })];
+      P(s.region ? 'الإدارة العامة للتعليم ' + (/^ال/.test(s.region) ? 'ب' + s.region : s.region) : 'إدارة التعليم', { bold: true, size: 18, color: GREEN, after: 0 })];
     let center = [P('', { after: 0 })];
     if (s.logo && /^data:image\/(png|jpe?g|gif)/.test(s.logo)) {
       try {
@@ -94,7 +101,7 @@
         out.push(title('بطاقة البيانات الأساسية للمدرسة', true));
         const rows = [['اسم المدرسة', s.name], ['الرقم الوزاري', s.ministryCode], ['إدارة التعليم', s.region], ['مكتب التعليم', s.office], ['المرحلة', s.stage], ['النوع', s.gender],
           ['عدد الطلاب', s.students], ['عدد المعلمين', s.teachers], ['عدد الفصول', s.classes], ['قائد المدرسة', s.principal], ['الوكيل', s.deputy], ['المشرف التربوي', s.supervisor],
-          ['الهاتف', s.phone], ['البريد الإلكتروني', s.email], ['العنوان', s.address], ['نوع التقرير', M.REPORT_TYPES[plan.report.type]], ['مدة تنفيذ الخطة', `${plan.period.start || '—'} إلى ${plan.period.end || '—'}`]];
+          ['الهاتف', s.phone], ['البريد الإلكتروني', s.email], ['العنوان', s.address], ['الفترة الدراسية', s.shift], ['نوع السلطة', s.authority], ['نوع المشاركة', s.participation], ['مرجع خطة منصة تميز', s.ref], ['مستوى نواتج التعلم', plan.report.outcomesLevel], ['نوع التقرير', M.REPORT_TYPES[plan.report.type]], ['مدة تنفيذ الخطة', `${plan.period.start || '—'} إلى ${plan.period.end || '—'}`]];
         out.push(table(null, rows.map(([k, v]) => [k, v || '']), { size: 21, widths: [30, 70], textCols: [0, 1] }));
         break;
       }
@@ -134,6 +141,14 @@
         out.push(h('ترتيب المجالات من الأدنى'), P(a.domainsRanked.map((x) => `${x.name} (${pct(M.scoreOf(x))})`).join(' ← ') || '—'));
         break;
       }
+      case 'recommendations': {
+        out.push(title('توصيات ومقترحات التحسين', true));
+        for (const r of plan.recommendations) {
+          out.push(h((plan.domains.find((d) => d.code === r.domain) || {}).name || 'المجال ' + r.domain));
+          r.items.forEach((x) => out.push(P('• ' + x, { size: 20, after: 20 })));
+        }
+        break;
+      }
       case 'compareSummary': {
         const c = p.cmp;
         out.push(title('المقارنة مع ' + c.label, true));
@@ -150,8 +165,8 @@
       }
       case 'domainIndex': {
         const dm = p.domain;
-        out.push(title(`المجال ${dm.code}: ${dm.name}`, true));
-        out.push(P(`أداء المجال: ${pct(M.scoreOf(dm))} — ${levelName(plan, M.scoreOf(dm))}`, { bold: true, size: 24 }));
+        out.push(title(`المجال ${dm.code}: ${dm.name}${p.part ? ' (تابع)' : ''}`, true));
+        if (!p.part) out.push(P(`أداء المجال: ${pct(M.scoreOf(dm))} — ${levelName(plan, M.scoreOf(dm))}`, { bold: true, size: 24 }));
         out.push(h('فهرس برامج المجال'));
         out.push(table(['الرمز', 'المؤشر', 'النسبة', 'المستوى', 'المستهدف', 'الصفحة'],
           p.items.map((it) => [plan.report.edition3 && it.ind.oldCode ? `${it.ind.code} (سابقًا ${it.ind.oldCode})` : it.ind.code, it.ind.text, pct(it.ind.score), levelName(plan, it.ind.score), pct(it.ind.target), it.no]),
@@ -161,21 +176,28 @@
       case 'indicator': {
         const i = p.ind, pl = i.plan;
         const gap = i.target != null && i.score != null ? M.round1(i.target - i.score) : '—';
-        out.push(title(`المؤشر ${i.code}${plan.report.edition3 && i.oldCode ? ` (سابقًا ${i.oldCode})` : ''}`, true));
+        out.push(title(`المؤشر ${i.code}${plan.report.edition3 && i.oldCode ? ` (سابقًا ${i.oldCode})` : ''}${p.part === 2 ? ' (تابع)' : ''}`, true));
         out.push(P(i.text, { bold: true, size: 24 }));
         out.push(P(`المجال: ${p.domain.name}    |    المعيار: ${M.standardName(plan, i.code)}`, { size: 19, color: '455555' }));
-        out.push(table(['الأداء الحالي', 'المستوى', 'المستهدف', 'الفجوة', ...(i.survey != null ? ['الاستبانات'] : [])], [[pct(i.score), levelName(plan, i.score), pct(i.target), gap, ...(i.survey != null ? [pct(i.survey)] : [])]], { size: 22 }));
-        out.push(h('المبادرة'), P(pl.initiative));
-        out.push(h('البرامج وأساليب التنفيذ'));
-        out.push(table(['م', 'البرنامج', 'أسلوب التنفيذ', 'المسؤول', 'من', 'إلى', 'التنفيذ', 'الإنجاز', 'تحقق الهدف'],
-          pl.programs.map((g, k) => [k + 1, g.name, g.method, g.owner, g.start, g.end, M.STATUS[g.status] || '', (g.completion || 0) + '%', g.achieved === true ? 'نعم' : g.achieved === false ? 'لا' : '—']),
-          { size: 17, widths: [4, 30, 14, 13, 9, 9, 8, 6, 7], textCols: [1] }));
-        out.push(h('الأدلة والشواهد'), ...pl.evidence.map((e) => P('• ' + e, { size: 20, after: 20 })));
-        out.push(h('مؤشر القياس'), P(pl.measure));
-        out.push(h('الفريق المكلف'), P(pl.team));
-        out.push(h('جدول قياس النواتج'));
-        out.push(table(['فترة القياس', 'القيمة المستهدفة', 'القيمة المتحققة', 'الحالة'],
-          pl.measurements.map((m) => [m.period, pct(m.target), pct(m.actual), m.actual == null || m.actual === '' ? '—' : Number(m.actual) >= Number(m.target) ? 'متحقق' : 'غير متحقق'])));
+        if (p.part !== 2) {
+          out.push(table(['الأداء الحالي', 'المستوى', 'المستهدف', 'الفجوة', ...(i.survey != null ? ['الاستبانات'] : [])], [[pct(i.score), levelName(plan, i.score), pct(i.target), gap, ...(i.survey != null ? [pct(i.survey)] : [])]], { size: 22 }));
+          if (pl.need) out.push(h('وصف الاحتياج'), P(pl.need, { size: 20 }));
+          if (pl.suggestion) out.push(h('مقترح التحسين الوارد في التقرير'), P(pl.suggestion, { size: 20 }));
+          out.push(h('المبادرة'), P(pl.initiative));
+          out.push(h('البرامج وإجراءات التحسين'));
+          out.push(table(['م', 'البرنامج / الإجراء', 'أسلوب التنفيذ', 'المسؤول', 'مدة التنفيذ', 'التنفيذ والإنجاز'],
+            pl.programs.map((g, k) => [k + 1, g.name, g.method, g.owner, [g.start, g.end].filter(Boolean).join('\n'), `${M.STATUS[g.status] || ''} · ${g.completion || 0}%${g.achieved === true ? '\nتحقق الهدف' : g.achieved === false ? '\nلم يتحقق' : ''}`]),
+            { size: 17, widths: [5, 45, 11, 15, 12, 12], textCols: [1] }));
+        }
+        if (p.part !== 1) {
+          if (pl.mechanisms && pl.mechanisms.length) out.push(h('أساليب وآليات التنفيذ'), ...pl.mechanisms.map((e) => P('• ' + e, { size: 20, after: 20 })));
+          out.push(h('الأدلة والشواهد'), ...pl.evidence.map((e) => P('• ' + e, { size: 20, after: 20 })));
+          out.push(h('مؤشر القياس'), P(pl.measure));
+          out.push(h('الفريق المكلف'), P(pl.team));
+          out.push(h('جدول قياس النواتج'));
+          out.push(table(['فترة القياس', 'القيمة المستهدفة', 'القيمة المتحققة', 'الحالة'],
+            pl.measurements.map((m) => [m.period, pct(m.target), pct(m.actual), m.actual == null || m.actual === '' ? '—' : Number(m.actual) >= Number(m.target) ? 'متحقق' : 'غير متحقق'])));
+        }
         break;
       }
       case 'sustain': {
@@ -206,9 +228,9 @@
       children: [run(plan.title + '  —  صفحة ', { size: 16, color: '667777' }), new d.TextRun({ children: [d.PageNumber.CURRENT], font: FONT, size: 16, color: '667777' })] })] });
   }
 
-  async function exportPlan(plan) {
+  async function exportPlan(plan, opts) {
     const d = D();
-    const st = X.structure(plan);
+    const st = X.structure(plan, opts);
     const children = [];
     st.pages.forEach((p) => children.push(...pageChildren(plan, p)));
     const doc = new d.Document({
@@ -233,13 +255,13 @@
         inds.map((i, k) => [k + 1, M.domainName(plan, i.code), M.standardName(plan, i.code), `${i.code}${plan.report.edition3 && i.oldCode ? ` (سابقًا ${i.oldCode})` : ''} ${i.text}`, pct(i.score), pct(i.target), i.plan.initiative,
           i.plan.programs.map((g, n) => `${n + 1}. ${g.name} (${g.method})`).join('\n'), i.plan.team.split('،')[0],
           `${(i.plan.programs[0] || {}).start || plan.period.start || ''} — ${(i.plan.programs[0] || {}).end || plan.period.end || ''}`, i.plan.measure, i.plan.evidence.join('، ')]),
-        { size: 15, textCols: [3, 6, 7, 10, 11] }),
+        { size: 15, textCols: [3, 6, 7, 10, 11], widths: [3, 7, 8, 14, 5, 5, 10, 21, 7, 7, 7, 6], total: LAND_W }),
       P(`قائد المدرسة: ${s.principal || ''} — التوقيع: ..........          المشرف التربوي: ${s.supervisor || ''} — التوقيع: ..........`, { bold: true, before: 200 })];
     const progs = inds.flatMap((i) => i.plan.programs.map((g) => ({ i, g })));
     const c2 = [title('الاستمارة (2): متابعة تنفيذ خطة التحسين', true),
       table(['م', 'المؤشر', 'البرنامج', 'المسؤول', 'حالة التنفيذ', 'نسبة الإنجاز', 'تحقق الهدف', 'الصعوبات / الملاحظات', 'الإجراء التصحيحي', 'ملاحظات المشرف'],
         progs.map(({ i, g }, k) => [k + 1, i.code, g.name, g.owner, M.STATUS[g.status] || '', (g.completion || 0) + '%', g.achieved === true ? 'نعم' : g.achieved === false ? 'لا' : '—', g.note || '', '', '']),
-        { size: 16, textCols: [2, 7] }),
+        { size: 16, textCols: [2, 7], widths: [4, 8, 28, 12, 8, 7, 7, 10, 8, 8], total: LAND_W }),
       P(`قائد المدرسة: ${s.principal || ''} — التوقيع: ..........     تاريخ المتابعة: ..../..../....هـ     المشرف التربوي: ${s.supervisor || ''} — التوقيع: ..........`, { bold: true, before: 200 })];
     // معالجة الأسطر المتعددة داخل الخلايا
     const doc = new d.Document({

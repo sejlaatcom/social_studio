@@ -2,11 +2,12 @@
 (function (global) {
   'use strict';
   const F = global.TahseenFramework;
-  const cmpCode = global.TahseenParser.cmpCode;
+  const P = global.TahseenParser;
+  const cmpCode = P.cmpCode;
   const STORE_KEY = 'tahseen.plans.v1';
 
   const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
-  const round1 = (v) => (v == null || isNaN(v) ? null : Math.round(v * 10) / 10);
+  const round1 = (v) => (v == null || isNaN(v) ? null : Math.round(v * 100) / 100);
   const avg = (arr) => { const a = arr.filter((v) => v != null && !isNaN(v)); return a.length ? a.reduce((s, v) => s + v, 0) / a.length : null; };
 
   const REPORT_TYPES = {
@@ -19,10 +20,11 @@
   function newPlan(title) {
     const now = new Date().toISOString();
     return {
-      id: uid(), title: title || 'خطة تحسين جديدة', createdAt: now, updatedAt: now,
+      id: uid(), version: 2, title: title || 'خطة تحسين جديدة', createdAt: now, updatedAt: now,
       school: { name: '', ministryCode: '', region: '', office: '', stage: '', gender: 'بنين', students: '', teachers: '', classes: '',
-        principal: '', deputy: '', supervisor: '', year: '', phone: '', email: '', address: '', logo: '' },
-      report: { type: 'self1', edition3: true, date: '', source: '', overall: null, overallParsed: null, hasSurvey: false },
+        principal: '', deputy: '', supervisor: '', year: '', phone: '', email: '', address: '', logo: '',
+        shift: '', authority: '', participation: '', ref: '' },
+      report: { type: 'self1', edition3: true, date: '', source: '', planSource: '', overall: null, overallParsed: null, hasSurvey: false, outcomesLevel: '', platformLevel: '' },
       domains: F.DEFAULT_DOMAINS.map((d) => ({ ...d, score: null })),
       standards: F.DEFAULT_STANDARDS.map((s) => ({ ...s, score: null })),
       indicators: [],
@@ -36,28 +38,54 @@
       approval: { preparedBy: '', principal: '', supervisor: '', date: '' },
       period: { start: '', end: '' },
       previous: null,
-      settings: { includeAdvanced: true, levels: F.LEVELS.map((l) => ({ ...l })) },
+      settings: { includeAdvanced: true, includeExcellence: false, levels: F.LEVELS.map((l) => ({ ...l })) },
     };
+  }
+
+  // ترقية الخطط المحفوظة بالإصدار الأول (رموز نقطية ومستويات بأسماء قديمة)
+  function migrate(p) {
+    if (!p || p.version >= 2) return p;
+    p.version = 2;
+    p.settings = p.settings || {};
+    if (p.settings.includeExcellence == null) p.settings.includeExcellence = false;
+    if (p.settings.levels) p.settings.levels.forEach((l) => { const d = F.LEVELS.find((x) => x.key === l.key); if (d) l.name = d.name; });
+    Object.assign(p.school, { shift: p.school.shift || '', authority: p.school.authority || '', participation: p.school.participation || '', ref: p.school.ref || '' });
+    p.report.outcomesLevel = p.report.outcomesLevel || '';
+    const fix = (x) => { if (x && x.code) x.code = P.normCode(x.code); };
+    p.domains.forEach(fix); p.standards.forEach(fix); p.indicators.forEach((i) => { fix(i); if (i.oldCode) i.oldCode = P.normCode(i.oldCode); upgradeIndPlan(i); });
+    return p;
+  }
+  function upgradeIndPlan(i) {
+    if (!i.plan) return;
+    if (i.plan.need == null) i.plan.need = '';
+    if (!Array.isArray(i.plan.mechanisms)) i.plan.mechanisms = [];
+    if (i.plan.suggestion == null) i.plan.suggestion = i.suggestion || '';
   }
 
   function levelsOf(plan) { return (plan && plan.settings && plan.settings.levels) || F.LEVELS; }
   function levelOf(plan, score) { return F.levelOf(score, levelsOf(plan)); }
+  const stageOf = (plan) => plan.school.stage || P.stageFrom(plan.school.name || '');
 
   function makeIndicatorPlan(ind, plan) {
     const s = F.suggestFor(ind);
     const start = (plan.period && plan.period.start) || '';
     const end = (plan.period && plan.period.end) || '';
+    const owner = s.team.split('،')[0].trim();
     return {
       initiative: s.initiative,
+      need: s.need || '',
+      suggestion: ind.suggestion || '',
       programs: s.programs.map((p, i) => ({
         id: uid(), name: p,
-        method: i === 0 ? 'ورشة عمل / اجتماع' : i === 1 ? 'تطبيق ميداني ومتابعة' : 'لقاءات دورية',
-        start, end, owner: s.team.split('،')[0].trim(), status: 'not', completion: 0, achieved: null, note: '',
+        method: s.fromBank ? 'إجراء تحسين' : i === 0 ? 'ورشة عمل / اجتماع' : i === 1 ? 'تطبيق ميداني ومتابعة' : 'لقاءات دورية',
+        start, end, owner, status: 'not', completion: 0, achieved: null, note: '',
       })),
+      mechanisms: (s.mechanisms || []).slice(),
       evidence: s.evidence.slice(),
       measure: s.measure,
       team: s.team,
       sustain: 'الاستمرار في تطبيق الممارسات الناجحة وتوثيقها وتعميمها',
+      source: s.fromBank ? 'bank' : 'library',
       measurements: [
         { period: 'القياس القبلي', target: null, actual: null },
         { period: 'نهاية الفترة الأولى', target: null, actual: null },
@@ -81,73 +109,178 @@
   function ensureIndicator(plan, ind) {
     if (ind.target == null && ind.score != null) ind.target = F.defaultTarget(ind.score, levelsOf(plan));
     if (!ind.plan) ind.plan = makeIndicatorPlan(ind, plan);
+    upgradeIndPlan(ind);
     fillMeasurements(ind);
     return ind;
   }
 
-  // دمج نتائج القراءة في الخطة مع المحافظة على التعديلات السابقة
+  function mergeMeta(plan, m) {
+    const sc = plan.school;
+    const set = (k, v) => { if (v && !sc[k]) sc[k] = v; };
+    set('name', m.schoolName); set('ministryCode', m.ministryCode); set('region', m.region); set('office', m.office);
+    set('stage', m.stage || P.stageFrom(m.schoolName || '')); set('year', m.year); set('students', m.students);
+    set('shift', m.shift); set('authority', m.authority); set('participation', m.participation); set('ref', m.ref);
+    if (m.gender) sc.gender = m.gender;
+    if (sc.name && /^خطة تحسين جديدة$/.test(plan.title)) plan.title = 'خطة تحسين ' + sc.name;
+  }
+
+  // دمج نتائج قراءة تقرير التقويم (نصّي أو بالتعرف الضوئي) مع المحافظة على التعديلات السابقة
   function applyParsed(plan, parsed, sourceName) {
+    if (parsed.kind === 'plan') return applyPlanReport(plan, parsed, sourceName);
     const m = parsed.meta || {};
-    plan.report.type = m.type || plan.report.type;
-    plan.report.edition3 = !!m.edition3 || plan.report.edition3;
+    if (m.type) plan.report.type = m.type;
+    plan.report.edition3 = parsed.ocr ? true : (!!m.edition3 || plan.report.edition3);
     plan.report.source = sourceName || plan.report.source;
     plan.report.hasSurvey = !!parsed.hasSurvey;
     plan.report.overallParsed = parsed.overall;
     if (parsed.overall != null) plan.report.overall = parsed.overall;
-    const sc = plan.school;
-    if (m.schoolName && !sc.name) sc.name = m.schoolName;
-    if (m.ministryCode && !sc.ministryCode) sc.ministryCode = m.ministryCode;
-    if (m.region && !sc.region) sc.region = m.region;
-    if (m.office && !sc.office) sc.office = m.office;
-    if (m.stage && !sc.stage) sc.stage = m.stage;
-    if (m.year && !sc.year) sc.year = m.year;
-    if (sc.name && plan.title === 'خطة تحسين جديدة') plan.title = 'خطة تحسين ' + sc.name;
+    mergeMeta(plan, m);
+    const stage = stageOf(plan);
 
-    for (const d of parsed.domains) {
+    for (const d of parsed.domains || []) {
       const ex = plan.domains.find((x) => x.code === d.code);
-      if (ex) { ex.score = d.score; if (d.name && d.name.length > 3) ex.name = d.name; }
-      else plan.domains.push({ ...d });
+      if (ex) { ex.score = d.score; if (d.name && d.name.length > 3) ex.name = d.name; } else plan.domains.push({ ...d });
     }
-    for (const s of parsed.standards) {
-      const ex = plan.standards.find((x) => x.code === s.code);
-      if (ex) { ex.score = s.score; if (s.name && s.name.length > 3) ex.name = s.name; }
-      else plan.standards.push({ ...s });
+    for (const s of parsed.standards || []) {
+      const code = P.normCode(s.code);
+      const ex = plan.standards.find((x) => x.code === code);
+      if (ex) { ex.score = s.score; if (s.name && s.name.length > 3) ex.name = s.name; } else plan.standards.push({ ...s, code });
     }
-    for (const pi of parsed.indicators) {
-      const ex = plan.indicators.find((x) => x.code === pi.code);
+    // قيم المعايير المقروءة من المخطط بالترتيب الرسمي
+    if (parsed.standardValues && parsed.standardValues.length) {
+      const order = F.DEFAULT_STANDARDS.map((s) => s.code);
+      parsed.standardValues.forEach((v, k) => { const st = plan.standards.find((x) => x.code === order[k]); if (st && v != null) st.score = v; });
+    }
+    for (const pi of parsed.indicators || []) {
+      if (!pi.code) continue;
+      const code = P.normCode(pi.code);
+      const official = F.catalogText(code, stage);
+      const text = official || pi.text;
+      const ex = plan.indicators.find((x) => x.code === code);
       if (ex) {
         ex.score = pi.score; if (pi.survey != null) ex.survey = pi.survey;
-        if (pi.text && pi.text.length > 5) ex.text = pi.text;
-        if (pi.oldCode) ex.oldCode = pi.oldCode;
+        if (text && text.length > 5) ex.text = text;
+        if (pi.oldCode) ex.oldCode = P.normCode(pi.oldCode);
+        if (pi.suggestion) { ex.suggestion = pi.suggestion; if (ex.plan && !ex.plan.suggestion) ex.plan.suggestion = pi.suggestion; }
         ex.values = pi.values;
-        fillMeasurements(ex);
+        if (ex.target == null && ex.score != null) ex.target = F.defaultTarget(ex.score, levelsOf(plan));
+        if (ex.plan) { ex.plan.measurements.forEach((mm) => { mm.target = null; }); ex.plan.measurements[0].actual = null; }
+        ensureIndicator(plan, ex);
       } else {
-        plan.indicators.push(ensureIndicator(plan, { code: pi.code, oldCode: pi.oldCode, text: pi.text, score: pi.score, survey: pi.survey, values: pi.values, target: null }));
+        plan.indicators.push(ensureIndicator(plan, { code, oldCode: pi.oldCode ? P.normCode(pi.oldCode) : '', text, score: pi.score, survey: pi.survey == null ? null : pi.survey,
+          values: pi.values, suggestion: pi.suggestion || '', target: null }));
       }
     }
-    plan.indicators.sort(cmpCode);
-    plan.domains.sort(cmpCode);
-    plan.standards.sort(cmpCode);
+    sortAll(plan);
     recompute(plan);
+    return { indicators: (parsed.indicators || []).length };
   }
 
+  // استيراد تقرير «خطة تحسين» من منصة تميز: يملأ إجراءات كل مؤشر
+  function applyPlanReport(plan, parsed, sourceName) {
+    const m = parsed.meta || {};
+    mergeMeta(plan, m);
+    plan.report.planSource = sourceName || 'خطة منصة تميز';
+    if (m.outcomesLevel) plan.report.outcomesLevel = m.outcomesLevel;
+    if (parsed.recommendations && parsed.recommendations.length) plan.recommendations = parsed.recommendations;
+    if (m.principal) { if (!plan.school.principal) plan.school.principal = m.principal; if (!plan.approval.principal) plan.approval.principal = m.principal; if (!plan.team[0].name) plan.team[0].name = m.principal; }
+    if (m.submittedAt && !plan.approval.date) plan.approval.date = m.submittedAt;
+    if (m.overallLevel) plan.report.platformLevel = m.overallLevel;
+    const stage = stageOf(plan);
+    const catalog = F.indicatorsFor(stage);
+    let matched = 0, added = 0;
+    const dates = [];
+    const used = new Set();
+    const key = (t) => P.normalize(t || '').replace(/[^\u0621-\u064A]/g, '');
+    const pick = (list, text, min) => {
+      let best = null, bs = 0;
+      for (const c of list) { if (used.has(c.code)) continue; const sc = P.similarity(c.text, text); if (sc > bs) { bs = sc; best = c; } }
+      return bs >= min ? best : null;
+    };
+    for (const a of parsed.actions || []) {
+      if (!a.text) continue;
+      const k = key(a.text);
+      // 1) تطابق تام مع مؤشر في الخطة أو في الإطار، 2) أقرب نص غير مستخدم
+      let ind = plan.indicators.find((i) => !used.has(i.code) && key(i.text) === k);
+      if (!ind) {
+        const cat = catalog.find((c) => !used.has(c.code) && key(c.text) === k) || pick(catalog, a.text, 0.75);
+        if (cat) ind = plan.indicators.find((i) => i.code === cat.code);
+        if (!ind) ind = pick(plan.indicators, a.text, 0.75);
+        if (!ind) {
+          const code = cat ? cat.code : nextFreeCode(plan, a);
+          ind = ensureIndicator(plan, { code, oldCode: '', text: cat ? cat.text : a.text, score: null, survey: null, target: null, provisional: !!(cat && cat.provisional) });
+          plan.indicators.push(ind); added++;
+        }
+      }
+      used.add(ind.code);
+      matched++;
+      const pl = ind.plan;
+      pl.need = a.need || pl.need;
+      if (a.procedureItems && a.procedureItems.length) {
+        pl.programs = a.procedureItems.map((name, k) => {
+          const old = pl.programs[k] && pl.source === 'platform' ? pl.programs[k] : null;
+          return { id: old ? old.id : uid(), name, method: 'إجراء تحسين', start: a.start, end: a.end, owner: (a.owner || '').split('،')[0].trim(),
+            status: old ? old.status : 'not', completion: old ? old.completion : 0, achieved: old ? old.achieved : null, note: old ? old.note : '' };
+        });
+      }
+      if (a.mechanismItems && a.mechanismItems.length) pl.mechanisms = a.mechanismItems.slice();
+      if (a.owner) pl.team = a.owner;
+      pl.source = 'platform';
+      if (a.start) dates.push(a.start, a.end);
+    }
+    if (dates.length) {
+      const sorted = dates.filter(Boolean).sort();
+      if (!plan.period.start) plan.period.start = sorted[0];
+      if (!plan.period.end) plan.period.end = sorted[sorted.length - 1];
+    }
+    plan.settings.includeExcellence = true;
+    sortAll(plan);
+    recompute(plan);
+    return { matched, added };
+  }
+
+  function nextFreeCode(plan, a) {
+    const std = (F.DEFAULT_STANDARDS.find((s) => s.name === a.standard) || {}).code || (a.domainCode ? a.domainCode + '-9' : '9-9');
+    let n = 1;
+    while (plan.indicators.some((i) => i.code === `${std}-9-${n}`)) n++;
+    return `${std}-9-${n}`;
+  }
+
+  // تحميل مؤشرات الإطار للمرحلة (للإدخال اليدوي)
+  function loadFramework(plan, stage) {
+    let n = 0;
+    for (const c of F.indicatorsFor(stage || stageOf(plan))) {
+      if (plan.indicators.some((i) => i.code === c.code)) continue;
+      plan.indicators.push(ensureIndicator(plan, { code: c.code, oldCode: '', text: c.text, score: null, survey: null, target: null, provisional: !!c.provisional }));
+      n++;
+    }
+    sortAll(plan);
+    recompute(plan);
+    return n;
+  }
+
+  function sortAll(plan) { plan.indicators.sort(cmpCode); plan.domains.sort(cmpCode); plan.standards.sort(cmpCode); }
+
   function addIndicator(plan, code, text, score) {
-    const ind = ensureIndicator(plan, { code, oldCode: '', text: text || '', score: score == null || score === '' ? null : Number(score), survey: null, target: null });
+    code = P.normCode(code);
+    const ind = ensureIndicator(plan, { code, oldCode: '', text: text || F.catalogText(code, stageOf(plan)) || '', score: score == null || score === '' ? null : Number(score), survey: null, target: null });
     plan.indicators.push(ind);
-    plan.indicators.sort(cmpCode);
+    sortAll(plan);
     recompute(plan);
     return ind;
   }
 
-  // استكمال نسب المعايير والمجالات والأداء العام من المؤشرات عند غيابها
+  const inStandard = (i, s) => P.standardOf(i.code) === s.code;
+  const inDomain = (i, d) => P.domainOf(i.code) === d.code;
+
   function recompute(plan) {
     for (const s of plan.standards) {
-      const inds = plan.indicators.filter((i) => i.code.startsWith(s.code + '.'));
+      const inds = plan.indicators.filter((i) => inStandard(i, s));
       s.computed = round1(avg(inds.map((i) => i.score)));
       s.count = inds.length;
     }
     for (const d of plan.domains) {
-      const inds = plan.indicators.filter((i) => i.code.startsWith(d.code + '.'));
+      const inds = plan.indicators.filter((i) => inDomain(i, d));
       d.computed = round1(avg(inds.map((i) => i.score)));
       d.count = inds.length;
     }
@@ -163,11 +296,11 @@
     return plan.report.computedOverall;
   }
   function standardName(plan, code) {
-    const s = plan.standards.find((x) => x.code === code.split('.').slice(0, 2).join('.'));
+    const s = plan.standards.find((x) => x.code === P.standardOf(code));
     return s ? s.name : '';
   }
   function domainName(plan, code) {
-    const d = plan.domains.find((x) => x.code === code.split('.')[0]);
+    const d = plan.domains.find((x) => x.code === P.domainOf(code));
     return d ? d.name : '';
   }
 
@@ -181,14 +314,14 @@
     return out;
   }
 
-  // المؤشرات المشمولة بصفحات التحسين
+  // المؤشرات المشمولة بصفحات الخطة
   function planIndicators(plan) {
     const lv = levelsOf(plan);
     return plan.indicators.filter((i) => {
       if (i.excluded) return false;
       const l = F.levelOf(i.score, lv);
       if (!l) return true;
-      if (l.key === 'excellence') return false;
+      if (l.key === 'excellence') return !!plan.settings.includeExcellence;
       if (l.key === 'advanced') return plan.settings.includeAdvanced !== false;
       return true;
     });
@@ -202,22 +335,21 @@
     const lv = levelsOf(plan);
     const scored = plan.indicators.filter((i) => i.score != null);
     const lowest = scored.slice().sort((a, b) => a.score - b.score).slice(0, 5);
-    // المكاسب السريعة: قريبة من عتبة المستوى التالي (≤ 7 نقاط)
     const quick = [];
     for (const i of scored) {
       const next = lv.slice().sort((a, b) => a.min - b.min).find((l) => l.min > i.score);
       if (next && next.min - i.score <= 7) quick.push({ ind: i, next, need: round1(next.min - i.score) });
     }
     quick.sort((a, b) => a.need - b.need);
-    const strengths = scored.filter((i) => i.score >= (lv.find((l) => l.key === 'excellence') || { min: 90 }).min).sort((a, b) => b.score - a.score);
-    // فجوة الإدراك: الاستبانات مقابل النتيجة الفعلية
+    const exMin = (lv.find((l) => l.key === 'excellence') || { min: 90 }).min;
+    const strengths = scored.filter((i) => i.score >= exMin).sort((a, b) => b.score - a.score);
     const gaps = scored.filter((i) => i.survey != null).map((i) => ({ ind: i, gap: round1(i.survey - i.score) }))
       .filter((g) => Math.abs(g.gap) >= 10).sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
     const surveyAvg = avg(scored.filter((i) => i.survey != null).map((i) => i.survey));
     const actualAvg = avg(scored.filter((i) => i.survey != null).map((i) => i.score));
     const domainsRanked = plan.domains.filter((d) => scoreOf(d) != null).slice().sort((a, b) => scoreOf(a) - scoreOf(b));
     const standardsRanked = plan.standards.filter((s) => scoreOf(s) != null).slice().sort((a, b) => scoreOf(a) - scoreOf(b));
-    return { lowest, quick: quick.slice(0, 6), strengths: strengths.slice(0, 6), gaps: gaps.slice(0, 6),
+    return { lowest, quick: quick.slice(0, 6), strengths: strengths.slice(0, 6), strengthsCount: strengths.length, gaps: gaps.slice(0, 6),
       surveyAvg: round1(surveyAvg), actualAvg: round1(actualAvg), domainsRanked, standardsRanked };
   }
 
@@ -245,23 +377,16 @@
 
   function previousFromParsed(parsed, label) {
     const tmp = newPlan('tmp');
-    tmp.indicators = [];
-    tmp.domains = F.DEFAULT_DOMAINS.map((d) => ({ ...d, score: null }));
-    tmp.standards = F.DEFAULT_STANDARDS.map((s) => ({ ...s, score: null }));
-    for (const d of parsed.domains) { const ex = tmp.domains.find((x) => x.code === d.code); if (ex) ex.score = d.score; else tmp.domains.push({ ...d }); }
-    for (const s of parsed.standards) { const ex = tmp.standards.find((x) => x.code === s.code); if (ex) ex.score = s.score; else tmp.standards.push({ ...s }); }
-    tmp.indicators = parsed.indicators.map((i) => ({ code: i.code, oldCode: i.oldCode, score: i.score }));
-    recompute(tmp);
-    const overall = parsed.overall != null ? parsed.overall : overallOf(tmp);
-    return { label: label || 'الدورة السابقة', overall,
+    applyParsed(tmp, parsed, '');
+    return { label: label || 'الدورة السابقة', overall: overallOf(tmp),
       domains: tmp.domains.map((d) => ({ code: d.code, score: d.score, computed: d.computed })),
       standards: tmp.standards.map((s) => ({ code: s.code, score: s.score, computed: s.computed })),
-      indicators: tmp.indicators };
+      indicators: tmp.indicators.map((i) => ({ code: i.code, oldCode: i.oldCode, score: i.score })) };
   }
 
   function progressOf(plan) {
     const progs = planIndicators(plan).flatMap((i) => i.plan.programs);
-    if (!progs.length) return { total: 0, done: 0, pct: 0, achieved: 0 };
+    if (!progs.length) return { total: 0, done: 0, progress: 0, late: 0, pct: 0, achieved: 0 };
     return {
       total: progs.length,
       done: progs.filter((p) => p.status === 'done').length,
@@ -274,56 +399,34 @@
 
   // ———— التخزين ————
   function loadAll() {
-    try { return JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch (e) { return []; }
+    try { return JSON.parse(localStorage.getItem(STORE_KEY) || '[]').map(migrate); } catch (e) { return []; }
   }
   function saveAll(plans) {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(plans)); return true; } catch (e) { return false; }
   }
 
-  // بيانات تجريبية لعرض الأداة
+  // خطة تجريبية بمؤشرات الإطار الرسمي ونسب افتراضية
   function demoPlan() {
     const p = newPlan('خطة تحسين — مدرسة تجريبية');
-    Object.assign(p.school, { name: 'مدرسة تجريبية', ministryCode: '000000', region: 'منطقة تجريبية', office: 'مكتب تجريبي', stage: 'الابتدائية', year: '1447', students: '420', teachers: '28', classes: '18', principal: 'قائد المدرسة', supervisor: 'المشرف التربوي' });
-    p.period = { start: '1447-03-01', end: '1447-11-30' };
-    const samples = [
-      ['1.1.1', 'توفر رؤية ورسالة وقيم واضحة للمدرسة يشارك في صياغتها منسوبوها', 92, 95],
-      ['1.1.2', 'تفويض الصلاحيات وتوزيع المهام وتفعيل فرق العمل', 78, 90],
-      ['1.2.1', 'بناء الخطة التشغيلية في ضوء نتائج التقويم الذاتي', 64, 88],
-      ['1.2.2', 'متابعة تنفيذ الخطة وقياس أثرها', 55, 80],
-      ['1.3.1', 'التواصل الفاعل مع الأسرة وإشراكها في تعلم أبنائها', 71, 85],
-      ['1.3.2', 'بناء شراكات مجتمعية داعمة', 46, 70],
-      ['2.1.1', 'التخطيط للدروس بما يراعي الفروق الفردية', 81, 90],
-      ['2.2.1', 'توظيف استراتيجيات التعلم النشط', 69, 92],
-      ['2.2.2', 'توظيف التقنية ومصادر التعلم الرقمية', 88, 86],
-      ['2.3.1', 'التقويم البنائي وتقديم التغذية الراجعة', 58, 84],
-      ['3.1.1', 'نتائج الطلاب في الاختبارات الوطنية (نافس)', 48, null],
-      ['3.1.2', 'تحسن التحصيل الدراسي في المهارات الأساسية', 73, null],
-      ['3.2.1', 'الانضباط والحضور والسلوك الإيجابي', 91, 93],
-      ['3.2.2', 'التطور الصحي والاجتماعي للطلاب', 76, 82],
-      ['4.1.1', 'تطبيق إجراءات الأمن والسلامة وفرضيات الإخلاء', 95, 96],
-      ['4.1.2', 'صيانة المبنى والمرافق ونظافتها', 84, 80],
-      ['4.2.1', 'تنوع الأنشطة ورعاية الموهوبين', 67, 85],
-      ['4.2.2', 'المناخ المدرسي الداعم للتعلم', 89, 91],
-    ];
-    for (const [code, text, score, survey] of samples) {
-      const i = addIndicator(p, code, text, score);
-      i.survey = survey;
-      if (code === '1.2.1') i.oldCode = '1.3.1';
-    }
+    Object.assign(p.school, { name: 'متوسطة تجريبية', ministryCode: 'S-000000', region: 'منطقة تجريبية', stage: 'المتوسطة', year: '1448', students: '420', teachers: '28', classes: '18', principal: 'قائد المدرسة', supervisor: 'المشرف التربوي' });
+    p.period = { start: '2026-11-16', end: '2027-06-17' };
+    loadFramework(p, 'المتوسطة');
+    const seed = [97, 92, 88, 84, 96, 79, 72, 91, 66, 58, 83, 95, 77, 81, 93, 98, 88, 69, 74, 91, 86, 93, 64, 81, 90, 76, 87, 95, 82, 58, 63, 77, 71, 68, 74, 92, 89, 95, 82, 90, 86, 94, 99, 93, 97, 88, 95, 91, 90];
+    p.indicators.forEach((i, k) => { i.score = seed[k % seed.length]; i.survey = Math.min(100, i.score + ((k % 5) - 1) * 4); i.target = null; i.plan = null; ensureIndicator(p, i); });
     p.report.hasSurvey = true;
+    recompute(p);
     p.previous = {
-      label: 'الدورة السابقة (1446هـ)', overall: 68.5,
-      domains: [{ code: '1', score: 63 }, { code: '2', score: 70 }, { code: '3', score: 66 }, { code: '4', score: 80 }],
-      standards: [],
-      indicators: samples.map(([code, , score], k) => ({ code, score: Math.max(30, score - (k % 4) * 4 + 2) })),
+      label: 'الدورة السابقة (1447هـ)', overall: 76.5,
+      domains: [{ code: '1', score: 80 }, { code: '2', score: 78 }, { code: '3', score: 66 }, { code: '4', score: 86 }],
+      standards: [], indicators: p.indicators.map((i, k) => ({ code: i.code, score: Math.max(30, i.score - (k % 4) * 3 + 1) })),
     };
     recompute(p);
     return p;
   }
 
   global.TahseenModel = {
-    uid, round1, avg, REPORT_TYPES, STATUS, newPlan, applyParsed, addIndicator, recompute, ensureIndicator, makeIndicatorPlan,
+    uid, round1, avg, REPORT_TYPES, STATUS, newPlan, migrate, applyParsed, applyPlanReport, loadFramework, addIndicator, recompute, ensureIndicator, makeIndicatorPlan,
     scoreOf, overallOf, standardName, domainName, distribution, planIndicators, sustainIndicators, analysis, comparison,
-    previousFromParsed, progressOf, loadAll, saveAll, demoPlan, levelsOf, levelOf,
+    previousFromParsed, progressOf, loadAll, saveAll, demoPlan, levelsOf, levelOf, stageOf, sortAll,
   };
 })(window);

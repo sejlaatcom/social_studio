@@ -7,31 +7,51 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const pct = (v) => (v == null || v === '' || isNaN(v) ? '—' : `${M.round1(Number(v))}%`);
   const chunk = (arr, n) => { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out.length ? out : [[]]; };
+  const regionTxt = (r) => (/^ال/.test(r) ? 'ب' + r : r);
   const codeLabel = (i, plan) => (plan.report.edition3 && i.oldCode ? `${i.code} <span class="old">(سابقًا ${esc(i.oldCode)})</span>` : esc(i.code));
 
+  // تقدير طول محتوى صفحة المؤشر لتقسيمها على صفحتين عند الحاجة
+  function weight(i) {
+    const pl = i.plan || {};
+    const len = (x) => String(x || '').length;
+    return len(pl.need) + len(pl.suggestion) + len(pl.initiative)
+      + (pl.programs || []).reduce((a, g) => a + len(g.name) + 45, 0)
+      + (pl.mechanisms || []).reduce((a, m) => a + len(m) + 10, 0)
+      + (pl.evidence || []).reduce((a, m) => a + len(m) + 10, 0) + len(pl.measure) + len(pl.team);
+  }
+
   // ———— هيكل المستند (مشترك بين PDF وWord لضمان تطابق أرقام الصفحات) ————
-  function structure(plan) {
+  function structure(plan, opts) {
+    const split = opts && opts.split;
     const pages = [];
     pages.push({ kind: 'cover' });
     pages.push({ kind: 'school' });
     pages.push({ kind: 'decision' });
     pages.push({ kind: 'summary' });
     pages.push({ kind: 'analysis' });
+    if (plan.recommendations && plan.recommendations.length) pages.push({ kind: 'recommendations' });
     const cmp = M.comparison(plan);
     if (cmp) {
       pages.push({ kind: 'compareSummary', cmp });
       chunk(cmp.rows, 24).forEach((rows, k) => pages.push({ kind: 'compareRows', rows, part: k + 1, cmp }));
     }
     const inds = M.planIndicators(plan);
-    const domains = plan.domains.filter((d) => inds.some((i) => i.code.split('.')[0] === d.code));
+    const dom = (i) => global.TahseenParser.domainOf(i.code);
+    const domains = plan.domains.filter((d) => inds.some((i) => dom(i) === d.code));
     for (const d of domains) {
-      const di = inds.filter((i) => i.code.split('.')[0] === d.code);
-      const idx = { kind: 'domainIndex', domain: d, items: [] };
-      pages.push(idx);
+      const di = inds.filter((i) => dom(i) === d.code);
+      // فهرس المجال: 10 مؤشرات في الصفحة الأولى ثم 18 في كل صفحة تالية
+      const nIdx = 1 + Math.max(0, Math.ceil((di.length - 10) / 18));
+      const idxPages = [];
+      for (let k = 0; k < nIdx; k++) { const ip = { kind: 'domainIndex', domain: d, items: [], part: k }; idxPages.push(ip); pages.push(ip); }
+      di.forEach((ind, j) => { ind._idx = j < 10 ? 0 : 1 + Math.floor((j - 10) / 18); });
       for (const ind of di) {
-        const pg = { kind: 'indicator', ind, domain: d };
+        const idx = idxPages[ind._idx];
+        const long = split ? split.has(ind.code) : weight(ind) > 1400;
+        const pg = { kind: 'indicator', ind, domain: d, part: long ? 1 : 0 };
         pages.push(pg);
         idx.items.push(pg);
+        if (long) pages.push({ kind: 'indicator', ind, domain: d, part: 2 });
       }
     }
     const sus = M.sustainIndicators(plan);
@@ -45,13 +65,13 @@
   function header(plan) {
     const s = plan.school;
     return `<div class="hdr">
-      <div class="hdr-r">المملكة العربية السعودية<br>وزارة التعليم<br>${s.region ? 'الإدارة العامة للتعليم ' + esc(s.region) : 'إدارة التعليم'}<br>${esc(s.office ? 'مكتب التعليم ' + s.office : '')}</div>
+      <div class="hdr-r">المملكة العربية السعودية<br>وزارة التعليم<br>${s.region ? 'الإدارة العامة للتعليم ' + esc(regionTxt(s.region)) : 'إدارة التعليم'}<br>${esc(s.office ? 'مكتب التعليم ' + s.office : '')}</div>
       <div class="hdr-c">${s.logo ? `<img src="${s.logo}" alt="">` : ''}</div>
       <div class="hdr-l">${esc(s.name || 'اسم المدرسة')}<br>${s.ministryCode ? 'الرقم الوزاري: ' + esc(s.ministryCode) : ''}<br>${s.year ? 'العام الدراسي ' + esc(s.year) + 'هـ' : ''}</div>
     </div>`;
   }
   const footer = (plan, no, total) => `<div class="ftr"><span>${esc(plan.title)}</span><span>صفحة ${no} من ${total}</span></div>`;
-  const page = (plan, p, total, body, cls) => `<section class="page ${cls || ''}">${p.kind === 'cover' ? '' : header(plan)}<div class="body">${body}</div>${footer(plan, p.no, total)}</section>`;
+  const page = (plan, p, total, body, cls) => `<section class="page ${cls || ''}"${p.kind === 'indicator' && !p.part ? ` data-code="${esc(p.ind.code)}"` : ''}>${p.kind === 'cover' ? '' : header(plan)}<div class="body">${body}</div>${footer(plan, p.no, total)}</section>`;
   const lvlBadge = (plan, v) => { const l = M.levelOf(plan, v); return l ? `<span class="lv" style="background:${l.soft};color:${l.color};border-color:${l.color}">${l.name}</span>` : '—'; };
 
   function barRows(plan, items) {
@@ -87,7 +107,7 @@
           ['اسم المدرسة', s.name], ['الرقم الوزاري', s.ministryCode], ['إدارة التعليم', s.region], ['مكتب التعليم', s.office],
           ['المرحلة', s.stage], ['النوع', s.gender], ['عدد الطلاب', s.students], ['عدد المعلمين', s.teachers], ['عدد الفصول', s.classes],
           ['قائد المدرسة', s.principal], ['الوكيل', s.deputy], ['المشرف التربوي', s.supervisor], ['الهاتف', s.phone], ['البريد الإلكتروني', s.email],
-          ['العنوان', s.address], ['نوع التقرير', M.REPORT_TYPES[plan.report.type]], ['مدة تنفيذ الخطة', `${plan.period.start || '—'} إلى ${plan.period.end || '—'}`],
+          ['العنوان', s.address], ['الفترة الدراسية', s.shift], ['نوع السلطة', s.authority], ['نوع المشاركة', s.participation], ['مرجع خطة منصة تميز', s.ref], ['مستوى نواتج التعلم', plan.report.outcomesLevel], ['نوع التقرير', M.REPORT_TYPES[plan.report.type]], ['مدة تنفيذ الخطة', `${plan.period.start || '—'} إلى ${plan.period.end || '—'}`],
         ];
         return page(plan, p, total, `<h3 class="ttl">بطاقة البيانات الأساسية للمدرسة</h3>
           <table class="kv">${chunk(rows, 2).map((r) => `<tr>${r.map(([k, v]) => `<th>${k}</th><td>${esc(v || '')}</td>`).join('')}</tr>`).join('')}</table>`);
@@ -112,7 +132,7 @@
         return page(plan, p, total, `<h3 class="ttl">لوحة النتائج</h3>
           <div class="kpis"><div class="kpi"><span>الأداء العام</span><b>${pct(ov)}</b>${lvlBadge(plan, ov)}</div>
           ${dist.map((l) => `<div class="kpi"><span>مستوى ${l.name}</span><b>${l.count}</b><small>مؤشر (${Math.round(l.count / totalInd * 100)}%)</small></div>`).join('')}</div>
-          <div class="stack">${dist.filter((l) => l.count).map((l) => `<div style="flex:${l.count};background:${l.color}">${l.name} ${l.count}</div>`).join('')}</div>
+          <div class="stack">${dist.filter((l) => l.count).map((l) => `<div style="flex:${l.count};background:${l.color}">${l.count / totalInd > 0.12 ? l.name + ' ' + l.count : l.count}</div>`).join('')}</div>
           <h4>أداء المجالات</h4><div class="bars">${barRows(plan, plan.domains)}</div>
           <h4>أداء المعايير</h4><div class="bars sm">${barRows(plan, plan.standards)}</div>`);
       }
@@ -131,6 +151,11 @@
           <h4>ترتيب المجالات من الأدنى</h4><p>${a.domainsRanked.map((d) => `${esc(d.name)} (${pct(M.scoreOf(d))})`).join(' ← ') || '—'}</p>
           <h4>المعايير الأولى بالتحسين</h4><p>${a.standardsRanked.slice(0, 4).map((d) => `${esc(d.code)} ${esc(d.name)} (${pct(M.scoreOf(d))})`).join('، ') || '—'}</p>`);
       }
+      case 'recommendations': {
+        return page(plan, p, total, `<h3 class="ttl">توصيات ومقترحات التحسين</h3>
+          <p class="small">وفق ما ورد في خطة التحسين بمنصة تميز، مصنّفة حسب المجالات.</p>
+          ${plan.recommendations.map((r) => `<div class="sec"><h5>${esc((plan.domains.find((d) => d.code === r.domain) || {}).name || 'المجال ' + r.domain)}</h5><ul class="two">${r.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')}`);
+      }
       case 'compareSummary': {
         const c = p.cmp;
         const dr = (r) => `<tr><td>${esc(r.code)}</td><td>${esc(r.name)}</td><td>${pct(r.prev)}</td><td>${pct(r.now)}</td><td class="${r.diff > 0 ? 'up' : r.diff < 0 ? 'down' : ''}">${r.diff == null ? '—' : (r.diff > 0 ? '▲ +' : r.diff < 0 ? '▼ ' : '') + r.diff}</td></tr>`;
@@ -148,29 +173,34 @@
       }
       case 'domainIndex': {
         const d = p.domain;
-        return page(plan, p, total, `<div class="dom-hero"><small>المجال ${esc(d.code)}</small><h2>${esc(d.name)}</h2><p>أداء المجال: <b>${pct(M.scoreOf(d))}</b> ${lvlBadge(plan, M.scoreOf(d))}</p></div>
-          <h4>فهرس برامج المجال</h4>
+        return page(plan, p, total, `${p.part ? '' : `<div class="dom-hero"><small>المجال ${esc(d.code)}</small><h2>${esc(d.name)}</h2><p>أداء المجال: <b>${pct(M.scoreOf(d))}</b> ${lvlBadge(plan, M.scoreOf(d))}</p></div>`}
+          <h4>فهرس برامج المجال${p.part ? ` — ${esc(d.name)} (تابع)` : ''}</h4>
           <table class="grid"><thead><tr><th>الرمز</th><th>المؤشر</th><th>النسبة</th><th>المستوى</th><th>المستهدف</th><th>الصفحة</th></tr></thead>
           <tbody>${p.items.map((it) => `<tr><td>${codeLabel(it.ind, plan)}</td><td class="tx">${esc(it.ind.text)}</td><td>${pct(it.ind.score)}</td><td>${lvlBadge(plan, it.ind.score)}</td><td>${pct(it.ind.target)}</td><td><b>${it.no}</b></td></tr>`).join('')}</tbody></table>`);
       }
       case 'indicator': {
         const i = p.ind, pl = i.plan;
         const gap = i.target != null && i.score != null ? M.round1(i.target - i.score) : null;
-        return page(plan, p, total, `
-          <div class="ind-head"><div class="ih-code">${codeLabel(i, plan)}</div><div class="ih-txt">${esc(i.text)}</div></div>
-          <div class="ih-meta"><span>المجال: <b>${esc(p.domain.name)}</b></span><span>المعيار: <b>${esc(M.standardName(plan, i.code))}</b></span></div>
-          <div class="kpis sm"><div class="kpi"><span>الأداء الحالي</span><b>${pct(i.score)}</b>${lvlBadge(plan, i.score)}</div>
+        const head = `<div class="ind-head"><div class="ih-code">${codeLabel(i, plan)}</div><div class="ih-txt">${esc(i.text)}</div></div>
+          <div class="ih-meta"><span>المجال: <b>${esc(p.domain.name)}</b></span><span>المعيار: <b>${esc(M.standardName(plan, i.code))}</b></span>${p.part === 2 ? '<span><b>(تابع)</b></span>' : ''}</div>`;
+        const kpis = `<div class="kpis sm"><div class="kpi"><span>الأداء الحالي</span><b>${pct(i.score)}</b>${lvlBadge(plan, i.score)}</div>
           <div class="kpi"><span>المستهدف</span><b>${pct(i.target)}</b>${lvlBadge(plan, i.target)}</div><div class="kpi"><span>الفجوة</span><b>${gap == null ? '—' : gap}</b></div>
-          ${i.survey != null ? `<div class="kpi"><span>الاستبانات</span><b>${pct(i.survey)}</b></div>` : ''}</div>
+          ${i.survey != null ? `<div class="kpi"><span>الاستبانات</span><b>${pct(i.survey)}</b></div>` : ''}</div>`;
+        const top = `${pl.need ? `<div class="sec"><h5>وصف الاحتياج</h5><p>${esc(pl.need)}</p></div>` : ''}
+          ${pl.suggestion ? `<div class="sec soft"><h5>مقترح التحسين الوارد في التقرير</h5><p>${esc(pl.suggestion)}</p></div>` : ''}
           <div class="sec"><h5>المبادرة</h5><p>${esc(pl.initiative)}</p></div>
-          <div class="sec"><h5>البرامج وأساليب التنفيذ</h5>
-          <table class="grid sm"><thead><tr><th>م</th><th>البرنامج</th><th>أسلوب التنفيذ</th><th>المسؤول</th><th>من</th><th>إلى</th><th>التنفيذ</th><th>الإنجاز</th><th>تحقق الهدف</th></tr></thead>
-          <tbody>${pl.programs.map((g, k) => `<tr><td>${k + 1}</td><td class="tx">${esc(g.name)}</td><td>${esc(g.method)}</td><td>${esc(g.owner)}</td><td>${esc(g.start)}</td><td>${esc(g.end)}</td><td>${M.STATUS[g.status] || ''}</td><td>${g.completion != null ? g.completion + '%' : ''}</td><td>${g.achieved === true ? 'نعم' : g.achieved === false ? 'لا' : '—'}</td></tr>`).join('')}</tbody></table></div>
+          <div class="sec"><h5>البرامج وإجراءات التحسين</h5>
+          <table class="grid sm"><thead><tr><th>م</th><th>البرنامج / الإجراء</th><th>أسلوب التنفيذ</th><th>المسؤول</th><th>مدة التنفيذ</th><th>التنفيذ والإنجاز</th></tr></thead>
+          <tbody>${pl.programs.map((g, k) => `<tr><td>${k + 1}</td><td class="tx">${esc(g.name)}</td><td>${esc(g.method)}</td><td>${esc(g.owner)}</td><td class="dt">${esc(g.start)}${g.end ? '<br>' + esc(g.end) : ''}</td><td class="dt">${M.STATUS[g.status] || ''} · ${g.completion || 0}%${g.achieved === true ? '<br>تحقق الهدف' : g.achieved === false ? '<br>لم يتحقق' : ''}</td></tr>`).join('')}</tbody></table></div>`;
+        const bottom = `${pl.mechanisms && pl.mechanisms.length ? `<div class="sec"><h5>أساليب وآليات التنفيذ</h5><ul class="two">${pl.mechanisms.map((e) => `<li>${esc(e)}</li>`).join('')}</ul></div>` : ''}
           <div class="cols2 tight"><div class="sec"><h5>الأدلة والشواهد</h5><ul>${pl.evidence.map((e) => `<li>${esc(e)}</li>`).join('')}</ul></div>
           <div class="sec"><h5>مؤشر القياس</h5><p>${esc(pl.measure)}</p><h5>الفريق المكلف</h5><p>${esc(pl.team)}</p></div></div>
           <div class="sec"><h5>جدول قياس النواتج</h5>
-          <table class="grid sm"><thead><tr><th>فترة القياس</th><th>القيمة المستهدفة</th><th>القيمة المتحققة</th><th>الحالة</th></tr></thead>
-          <tbody>${pl.measurements.map((m) => `<tr><td>${esc(m.period)}</td><td>${pct(m.target)}</td><td>${pct(m.actual)}</td><td>${m.actual == null || m.actual === '' ? '—' : Number(m.actual) >= Number(m.target) ? '✔ متحقق' : '✖ غير متحقق'}</td></tr>`).join('')}</tbody></table></div>`, 'ind-page');
+          <table class="grid sm"><thead><tr><th>فترة القياس</th>${pl.measurements.map((m) => `<th>${esc(m.period)}</th>`).join('')}</tr></thead>
+          <tbody><tr><td><b>المستهدف</b></td>${pl.measurements.map((m) => `<td>${pct(m.target)}</td>`).join('')}</tr>
+          <tr><td><b>المتحقق</b></td>${pl.measurements.map((m) => `<td>${pct(m.actual)}${m.actual == null || m.actual === '' ? '' : Number(m.actual) >= Number(m.target) ? ' ✔' : ' ✖'}</td>`).join('')}</tr></tbody></table></div>`;
+        const body = p.part === 1 ? head + kpis + top : p.part === 2 ? head + bottom : head + kpis + top + bottom;
+        return page(plan, p, total, body, 'ind-page' + (weight(i) > 600 && p.part !== 2 ? ' dense' : ''));
       }
       case 'sustain': {
         return page(plan, p, total, `<h3 class="ttl">جدول استدامة مؤشرات التقدّم والتميّز</h3>
@@ -204,7 +234,7 @@
   .hdr{display:flex;justify-content:space-between;align-items:center;border-bottom:2.5px solid #0f6b5c;padding-bottom:3mm;margin-bottom:4mm;font-size:9.5pt;line-height:1.55;color:#0f4c43;font-weight:700}
   .hdr-r,.hdr-l{width:38%}.hdr-l{text-align:left}.hdr-c{width:24%;text-align:center}.hdr-c img{max-height:20mm;max-width:40mm}
   .logo-ph{display:inline-block;padding:3mm 6mm;border:1.5px solid #0f6b5c;border-radius:3mm;color:#0f6b5c;font-size:13pt}
-  .body{flex:1;font-size:10.5pt;line-height:1.7}
+  .body{flex:1;min-height:0;overflow:hidden;font-size:10.5pt;line-height:1.7}
   .ftr{position:absolute;bottom:6mm;left:12mm;right:12mm;display:flex;justify-content:space-between;font-size:8.5pt;color:#667;border-top:1px solid #cfdcd8;padding-top:2mm}
   .ttl{background:#0f6b5c;color:#fff;padding:2.5mm 4mm;border-radius:2mm;font-size:14pt;margin:0 0 4mm}
   h4{color:#0f6b5c;margin:4mm 0 2mm;font-size:11.5pt}h5{margin:0 0 1mm;color:#0f6b5c;font-size:10.5pt}
@@ -237,11 +267,13 @@
   .ih-txt{flex:1;border:1.5px solid #0f6b5c;border-radius:2mm;padding:2mm 3mm;font-weight:700;font-size:11.5pt;display:flex;align-items:center}
   .ih-meta{display:flex;gap:6mm;font-size:9pt;color:#455;margin-bottom:1mm}
   .sec{border:1px solid #dbe7e3;border-radius:2mm;padding:2mm 3mm;margin-bottom:2mm}.sec p{margin:0}.sec ul{margin:0;padding-inline-start:5mm}
-  .ind-page .body{font-size:9.8pt;line-height:1.55}
+  .ind-page .body{font-size:9.8pt;line-height:1.55}.ind-page.dense .body{font-size:8.6pt;line-height:1.42}.ind-page.dense .grid.sm{font-size:7.9pt}.ind-page .hdr{font-size:8.5pt;padding-bottom:2mm;margin-bottom:3mm;line-height:1.4}.ind-page .sec{padding:1.5mm 2.5mm;margin-bottom:1.6mm}.ind-page .kpis.sm{margin:1mm 0 2mm}.ind-page .kpis.sm .kpi{padding:1.2mm}.ind-page .kpis.sm .kpi b{font-size:11.5pt}.ind-page .ih-txt{font-size:10.5pt}.ind-page .grid.sm th,.ind-page .grid.sm td{padding:.8mm 1.2mm}
+  .grid td:first-child{white-space:nowrap}.ih-code{white-space:nowrap}
+  .sec.soft{background:#f6faf9}.grid td.dt{white-space:nowrap;font-size:8pt}ul.two{columns:2;column-gap:6mm}
   `;
 
-  function buildPlanHtml(plan) {
-    const st = structure(plan);
+  function buildPlanHtml(plan, opts) {
+    const st = structure(plan, opts);
     const pagesHtml = st.pages.map((p) => renderPage(plan, p, st.total, st)).join('\n');
     return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(plan.title)}</title>
       <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -254,7 +286,7 @@
     const inds = M.planIndicators(plan);
     const rows1 = inds.map((i) => ({ i, progs: i.plan.programs }));
     const progs = inds.flatMap((i) => i.plan.programs.map((g) => ({ i, g })));
-    const hdr = `<div class="lhdr"><div>المملكة العربية السعودية<br>وزارة التعليم<br>${esc(s.region ? 'الإدارة العامة للتعليم ' + s.region : 'إدارة التعليم')}</div>
+    const hdr = `<div class="lhdr"><div>المملكة العربية السعودية<br>وزارة التعليم<br>${esc(s.region ? 'الإدارة العامة للتعليم ' + regionTxt(s.region) : 'إدارة التعليم')}</div>
       <div class="lc">${s.logo ? `<img src="${s.logo}" alt="">` : ''}</div>
       <div style="text-align:left">المدرسة: ${esc(s.name)}<br>الرقم الوزاري: ${esc(s.ministryCode)}<br>المشرف التربوي: ${esc(s.supervisor)}</div></div>`;
     const p1 = [rows1].map((part, k, all) => `<section class="lpage">${hdr}
@@ -304,5 +336,25 @@
     return true;
   }
 
-  global.TahseenPdf = { structure, buildPlanHtml, buildSupervisoryHtml, printHtml, previewHtml, esc, pct, chunk };
+  // قياس فعلي: تُعرض الخطة خارج الشاشة وتُحدَّد صفحات المؤشرات التي يتجاوز محتواها الصفحة لتُقسَّم على صفحتين
+  async function measureSplits(plan) {
+    const html = buildPlanHtml(plan, { split: new Set() });
+    const fr = document.createElement('iframe');
+    fr.style.cssText = 'position:fixed;left:-10000px;top:0;width:900px;height:1200px;border:0;visibility:hidden';
+    document.body.appendChild(fr);
+    try {
+      const doc = fr.contentWindow.document;
+      doc.open(); doc.write(html); doc.close();
+      await Promise.race([doc.fonts && doc.fonts.ready ? doc.fonts.ready : Promise.resolve(), new Promise((r) => setTimeout(r, 2500))]);
+      await new Promise((r) => setTimeout(r, 150));
+      const out = new Set();
+      doc.querySelectorAll('section.page[data-code]').forEach((sec) => {
+        const b = sec.querySelector('.body');
+        if (b && b.scrollHeight > b.clientHeight + 2) out.add(sec.getAttribute('data-code'));
+      });
+      return out;
+    } finally { fr.remove(); }
+  }
+
+  global.TahseenPdf = { measureSplits, structure, weight, buildPlanHtml, buildSupervisoryHtml, printHtml, previewHtml, esc, pct, chunk };
 })(window);

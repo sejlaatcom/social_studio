@@ -50,7 +50,7 @@ input[type=text], input[type=number], input[type=date], input:not([type]), selec
 input:focus, select:focus, textarea:focus { outline: 2px solid rgba(15, 107, 92, .25); border-color: var(--brand); }
 textarea { resize: vertical; min-height: 64px; }
 
-.drop { border: 2px dashed #9cc4b9; border-radius: var(--radius); padding: 34px 20px; text-align: center; background: #f7fbfa; cursor: pointer; transition: .15s; }
+.drop { display: block; border: 2px dashed #9cc4b9; border-radius: var(--radius); padding: 34px 20px; text-align: center; background: #f7fbfa; cursor: pointer; transition: .15s; }
 .drop.over, .drop:hover { background: var(--brand-soft); border-color: var(--brand); }
 .drop b { font-size: 18px; display: block; margin-bottom: 4px; }
 
